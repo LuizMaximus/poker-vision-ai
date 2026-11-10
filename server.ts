@@ -3,7 +3,9 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
-import { MercadoPagoConfig, Preference } from 'mercadopago';
+import { MercadoPagoConfig, Preference, Payment } from 'mercadopago';
+import { initializeApp } from 'firebase/app';
+import { getFirestore, doc, setDoc } from 'firebase/firestore';
 
 dotenv.config();
 
@@ -15,10 +17,26 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
 app.use(express.json({ limit: '15mb' }));
 
-// --- CONFIGURAÇÃO MERCADO PAGO ---
-// IMPORTANTE: APP_USR-6049645254760093-111012-1e783a57da14368c685a1cbae99b04e9-3829450069
+// --- 1. CONFIGURAÇÕES ---
+// CHAVE DO MERCADO PAGO ATUALIZADA:
 const client = new MercadoPagoConfig({ accessToken: 'APP_USR-6049645254760093-111012-1e783a57da14368c685a1cbae99b04e9-3829450069' });
 
+// CHAVES DO FIREBASE NO SERVIDOR
+const firebaseConfig = {
+  apiKey: "AIzaSyAQSdhDE1j2A2VdLW9i2LvicpO_lUFKEbs",
+  authDomain: "poker-vision-ai.firebaseapp.com",
+  projectId: "poker-vision-ai",
+  storageBucket: "poker-vision-ai.firebasestorage.app",
+  messagingSenderId: "168580259823",
+  appId: "1:168580259823:web:fc7b9432b5ad12735b201a",
+  measurementId: "G-XH3NVL13DH"
+};
+const firebaseApp = initializeApp(firebaseConfig);
+const db = getFirestore(firebaseApp);
+
+
+// --- 2. ROTAS DE PAGAMENTO ---
+// Gerar Checkout
 app.post('/api/checkout', async (req: Request, res: Response) => {
   try {
     const host = req.get('host');
@@ -28,35 +46,49 @@ app.post('/api/checkout', async (req: Request, res: Response) => {
     const preference = new Preference(client);
     const result = await preference.create({
       body: {
-        items: [
-          {
-            id: 'plano_pro',
-            title: 'Poker Vision AI - Acesso PRO',
-            quantity: 1,
-            unit_price: 29.90,
-            currency_id: 'BRL',
-          }
-        ],
-        // A linha "payer" foi TOTALMENTE removida aqui. O Mercado Pago vai pedir o email na tela de pagamento.
-        back_urls: {
-          success: `${baseUrl}?status=success`,
-          failure: `${baseUrl}?status=failure`,
-          pending: `${baseUrl}?status=pending`
-        },
+        items: [{ id: 'plano_pro', title: 'Poker Vision AI - Acesso PRO', quantity: 1, unit_price: 29.90, currency_id: 'BRL' }],
+        back_urls: { success: `${baseUrl}?status=success`, failure: `${baseUrl}?status=failure`, pending: `${baseUrl}?status=pending` },
         auto_return: 'approved'
       }
     });
 
-    const initUrl = client.accessToken.startsWith('TEST') ? result.sandbox_init_point : result.init_point;
+    // Força o link de Sandbox (Teste) para garantir que funciona sem erros de restrição de conta
+    const initUrl = result.sandbox_init_point || result.init_point;
     res.json({ init_point: initUrl });
-    
   } catch (error: any) {
-    console.error("Erro detalhado no Mercado Pago:", error);
-    res.status(500).json({ error: error.message || 'Falha na API do Mercado Pago.' });
+    console.error("Erro no Mercado Pago:", error);
+    res.status(500).json({ error: error.message });
   }
 });
 
-// --- LÓGICA GTO MIGRADA PARA O SERVIDOR ---
+// OUVINTE (WEBHOOK) - Desbloqueia o Firebase automaticamente
+app.post('/api/webhook', async (req: Request, res: Response) => {
+  try {
+    const action = req.body.action || req.query.topic;
+    
+    if (action === 'payment.created' || action === 'payment') {
+      const paymentId = req.body.data?.id || req.query.id;
+      const paymentClient = new Payment(client);
+      const paymentData = await paymentClient.get({ id: paymentId as string });
+
+      if (paymentData.status === 'approved') {
+        const email = paymentData.payer?.email;
+        if (email) {
+          // Salva no banco de dados: isPro = true
+          await setDoc(doc(db, 'users', email), { isPro: true }, { merge: true });
+          console.log(`SUCESSO: Conta PRO ativada automaticamente para: ${email}`);
+        }
+      }
+    }
+    res.status(200).send('OK');
+  } catch (error) {
+    console.error('Erro no Webhook:', error);
+    res.status(500).send('Erro interno');
+  }
+});
+
+
+// --- 3. LÓGICA GTO MANTIDA ---
 const getRankVal = (r: string) => '23456789TJQKA'.indexOf(r.toUpperCase());
 function getHandKey(card1: string, card2: string): string {
   if (!card1 || !card2) return '';
