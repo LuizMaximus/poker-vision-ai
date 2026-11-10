@@ -1,91 +1,74 @@
 import React from 'react';
 import { X } from 'lucide-react';
-import { RANKS, SUITS, SUIT_INFO } from '../utils/pokerEngine';
 
-interface CardPickerModalProps {
+interface Props {
   isOpen: boolean;
   onClose: () => void;
   selectedCards: string[];
   onSelectCard: (card: string) => void;
-  maxCards?: number;
-  title?: string;
+  maxCards: number;
+  title: string;
 }
 
-export const CardPickerModal: React.FC<CardPickerModalProps> = ({
-  isOpen,
-  onClose,
-  selectedCards,
-  onSelectCard,
-  maxCards = 2,
-  title = "Selecione as Cartas"
-}) => {
+const SUITS = ['s', 'h', 'd', 'c'];
+const RANKS = ['A', 'K', 'Q', 'J', 'T', '9', '8', '7', '6', '5', '4', '3', '2'];
+
+export const CardPickerModal: React.FC<Props> = ({ isOpen, onClose, selectedCards, onSelectCard, maxCards, title }) => {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/85 backdrop-blur-sm animate-in fade-in">
-      <div className="w-full max-w-md bg-[#0c2419] border border-emerald-800/60 rounded-t-3xl sm:rounded-2xl p-5 shadow-2xl text-slate-100 max-h-[90vh] overflow-y-auto">
-        
-        {/* Cabeçalho */}
-        <div className="flex items-center justify-between mb-4 pb-2 border-b border-emerald-800/50">
-          <div>
-            <h3 className="text-lg font-bold text-amber-300 font-serif">{title}</h3>
-            <span className="text-xs font-medium text-emerald-400">
-              Selecionadas: {selectedCards.length} / {maxCards}
-            </span>
-          </div>
-          <button
-            onClick={onClose}
-            className="w-8 h-8 rounded-full bg-emerald-950/80 border border-emerald-700/60 text-slate-300 flex items-center justify-center active:bg-emerald-900"
-          >
-            <X className="w-5 h-5" />
-          </button>
+    <div className="fixed inset-0 z-50 flex flex-col bg-slate-950/90 backdrop-blur-xl animate-in fade-in duration-200">
+      <div className="flex items-center justify-between p-4 bg-[#0c2419] border-b border-emerald-800/50 shadow-lg sticky top-0 z-10">
+        <div>
+          <h2 className="text-lg font-black text-amber-400">{title}</h2>
+          <span className="text-xs font-bold text-emerald-500">{selectedCards.length} / {maxCards} selecionadas</span>
         </div>
+        <button onClick={onClose} className="p-2 bg-slate-900/50 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 active:scale-90 transition-all">
+          <X className="w-6 h-6" />
+        </button>
+      </div>
 
-        {/* Grelha de Naipes e Cartas */}
-        <div className="flex flex-col gap-5">
-          {SUITS.map(suit => {
-            const info = SUIT_INFO[suit];
-            return (
-              <div key={suit} className="flex flex-col gap-2">
-                <div className={`flex items-center gap-2 px-1 ${info.color}`}>
-                  <span className="text-xl">{info.symbol}</span>
-                  <span className="text-[10px] font-black uppercase tracking-wider">{info.name}</span>
-                </div>
+      <div className="flex-1 overflow-y-auto p-4 pb-24">
+        {SUITS.map(suit => (
+          <div key={suit} className="mb-6 bg-black/20 p-3 rounded-2xl border border-white/5">
+            <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-7 gap-2">
+              {RANKS.map(rank => {
+                const card = `${rank}${suit}`;
+                const isSelected = selectedCards.includes(card);
+                const isRed = suit === 'h' || suit === 'd';
+                const suitSymbol = suit === 's' ? '♠' : suit === 'h' ? '♥' : suit === 'd' ? '♦' : '♣';
                 
-                <div className="grid grid-cols-7 gap-1.5">
-                  {RANKS.map(rank => {
-                    const cardStr = `${rank}${suit}`;
-                    const isSelected = selectedCards.includes(cardStr);
-                    
-                    return (
-                      <button
-                        key={rank}
-                        onClick={() => onSelectCard(cardStr)}
-                        className={`h-11 rounded-lg font-black text-sm flex items-center justify-center transition-all border ${
-                          isSelected
-                            ? 'bg-amber-400 border-amber-300 text-slate-950 shadow-md scale-[1.05]'
-                            : 'bg-[#05140e] border-emerald-800/40 text-slate-200 active:bg-emerald-900/60'
-                        }`}
-                      >
-                        {rank}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-        
-        {/* Botão Concluir */}
-        <div className="mt-6">
-          <button
-            onClick={onClose}
-            className="w-full py-3.5 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-700 text-white font-black uppercase tracking-widest shadow-lg hover:from-emerald-500 hover:to-emerald-600 active:scale-[0.98] transition-all"
-          >
-            Concluir
-          </button>
-        </div>
+                return (
+                  <button
+                    key={card}
+                    onClick={() => onSelectCard(card)}
+                    className={`relative h-16 rounded-xl flex flex-col items-center justify-center border transition-all duration-200 active:scale-95 ${
+                      isSelected 
+                        ? 'bg-amber-400 border-amber-300 text-slate-950 shadow-[0_0_15px_rgba(251,191,36,0.4)] scale-105 z-10' 
+                        : 'bg-white border-slate-300 hover:border-amber-400 hover:shadow-md'
+                    }`}
+                  >
+                    <span className={`text-lg font-black leading-none ${isSelected ? 'text-slate-950' : isRed ? 'text-red-600' : 'text-slate-900'}`}>
+                      {rank}
+                    </span>
+                    <span className={`text-xl leading-none mt-1 ${isSelected ? 'text-slate-950' : isRed ? 'text-red-600' : 'text-slate-900'}`}>
+                      {suitSymbol}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="fixed bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-slate-950 via-slate-950 to-transparent pointer-events-none flex justify-center">
+        <button 
+          onClick={onClose} 
+          className="pointer-events-auto w-full max-w-sm py-4 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-black uppercase tracking-widest shadow-[0_0_20px_rgba(5,150,105,0.4)] active:scale-95 transition-all flex items-center justify-center gap-2"
+        >
+          Confirmar Seleção
+        </button>
       </div>
     </div>
   );
