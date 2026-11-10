@@ -1,0 +1,6 @@
+{
+  "name": "Poker Vision AI",
+  "description": "Assistente inteligente de visão computacional e tomada de decisão estratégica em tempo real para Texas Hold'em.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

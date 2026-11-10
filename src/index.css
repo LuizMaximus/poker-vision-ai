@@ -1,0 +1,74 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --felt-dark: #081a12;
+    --felt-base: #0c2b1e;
+    --felt-light: #123e2b;
+    --gold-primary: #d4af37;
+    --gold-light: #f5d77f;
+    --gold-dark: #aa820a;
+  }
+
+  body {
+    background-color: #06130d;
+    color: #e2e8f0;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+}
+
+/* Subtle casino felt background gradient & texture */
+.casino-felt {
+  background: radial-gradient(circle at 50% 30%, #113827 0%, #0a2419 55%, #05140e 100%);
+}
+
+.felt-card-surface {
+  background: rgba(14, 38, 28, 0.75);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(212, 175, 55, 0.18);
+}
+
+.gold-glow {
+  box-shadow: 0 0 20px rgba(212, 175, 55, 0.25);
+}
+
+.gold-border {
+  border-color: rgba(212, 175, 55, 0.4);
+}
+
+/* Radar scanner beam animation */
+@keyframes radar-scan {
+  0% {
+    top: 0%;
+    opacity: 0.8;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    top: 100%;
+    opacity: 0.2;
+  }
+}
+
+.radar-line {
+  animation: radar-scan 2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #081711;
+}
+::-webkit-scrollbar-thumb {
+  background: #1b4533;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #286349;
+}
