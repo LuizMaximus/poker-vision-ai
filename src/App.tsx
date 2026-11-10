@@ -3,7 +3,7 @@ import { TablePosition, PokerDecision } from './utils/pokerTypes';
 import { fetchFastDecision, StackDepth, GameMode } from './utils/pokerEngine';
 import { CardPickerModal } from './components/CardPickerModal';
 import { DecisionDisplay } from './components/DecisionDisplay';
-import { Zap, RotateCcw, Swords, Coins, Trophy, Lock, Crown, LogOut, Mail, KeyRound, Loader2 } from 'lucide-react'; // Adicionado Loader2
+import { Zap, RotateCcw, Swords, Coins, Trophy, Lock, Crown, LogOut, Mail, KeyRound, Loader2 } from 'lucide-react';
 
 import { auth, db } from './firebase';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, User } from 'firebase/auth';
@@ -19,7 +19,7 @@ export const App: React.FC = () => {
 
   const [isProUser, setIsProUser] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
-  const [isCheckoutLoading, setIsCheckoutLoading] = useState(false); // NOVO: Estado de loading do pagamento
+  const [isCheckoutLoading, setIsCheckoutLoading] = useState(false);
 
   const [gameMode, setGameMode] = useState<GameMode>('MTT');
   const [heroHand, setHeroHand] = useState<string[]>([]);
@@ -58,7 +58,6 @@ export const App: React.FC = () => {
     }
   };
 
-  // --- NOVO: FUNÇÃO QUE CHAMA O MERCADO PAGO ---
   const handlePayment = async () => {
     setIsCheckoutLoading(true);
     try {
@@ -69,7 +68,7 @@ export const App: React.FC = () => {
       });
       const data = await res.json();
       if (data.init_point) {
-        window.location.href = data.init_point; // Redireciona o utilizador para pagar!
+        window.location.href = data.init_point;
       } else {
         alert("Erro ao conectar com a operadora de pagamentos.");
       }
@@ -224,7 +223,6 @@ export const App: React.FC = () => {
         </div>
       </main>
 
-      {/* --- MODAL PAYWALL ATUALIZADO --- */}
       {showUpgradeModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md">
           <div className="bg-gradient-to-b from-emerald-900 to-slate-950 border border-emerald-500/30 w-full max-w-sm rounded-2xl p-6 shadow-2xl text-center">
