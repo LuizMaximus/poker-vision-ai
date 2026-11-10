@@ -70,14 +70,13 @@ export const App: React.FC = () => {
       if (data.init_point) {
         window.location.href = data.init_point;
       } else {
-        alert("Erro ao conectar com a operadora de pagamentos.");
+        alert("Erro Mercado Pago: " + (data.error || "Desconhecido"));
       }
     } catch (error) {
       console.error(error);
     }
     setIsCheckoutLoading(false);
   };
-
   useEffect(() => {
     if (!user) return;
     let isMounted = true;
