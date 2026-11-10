@@ -16,12 +16,11 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 app.use(express.json({ limit: '15mb' }));
 
 // --- CONFIGURAÇÃO MERCADO PAGO ---
-// APP_USR-6049645254760093-111012-1e783a57da14368c685a1cbae99b04e9-3829450069:
-const client = new MercadoPagoConfig({ accessToken: 'COLE_SEU_TOKEN_TEST_AQUI' });
+// IMPORTANTE: APP_USR-6049645254760093-111012-1e783a57da14368c685a1cbae99b04e9-3829450069
+const client = new MercadoPagoConfig({ accessToken: 'APP_USR-6049645254760093-111012-1e783a57da14368c685a1cbae99b04e9-3829450069' });
 
 app.post('/api/checkout', async (req: Request, res: Response) => {
   try {
-    const { email } = req.body;
     const host = req.get('host');
     const protocol = req.headers['x-forwarded-proto'] || req.protocol;
     const baseUrl = `${protocol}://${host}`;
@@ -38,7 +37,7 @@ app.post('/api/checkout', async (req: Request, res: Response) => {
             currency_id: 'BRL',
           }
         ],
-        payer: { email: email },
+        // A linha "payer" foi TOTALMENTE removida aqui. O Mercado Pago vai pedir o email na tela de pagamento.
         back_urls: {
           success: `${baseUrl}?status=success`,
           failure: `${baseUrl}?status=failure`,
@@ -48,7 +47,6 @@ app.post('/api/checkout', async (req: Request, res: Response) => {
       }
     });
 
-    // Se for chave TESTE, usamos o link Sandbox, senão usamos o de Produção
     const initUrl = client.accessToken.startsWith('TEST') ? result.sandbox_init_point : result.init_point;
     res.json({ init_point: initUrl });
     
