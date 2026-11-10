@@ -16,12 +16,12 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 app.use(express.json({ limit: '15mb' }));
 
 // --- CONFIGURAÇÃO MERCADO PAGO ---
-const client = new MercadoPagoConfig({ accessToken: 'APP_USR-ac8e4980-cd21-4ec0-ad5f-5e7e33096994' });
+// APP_USR-6049645254760093-111012-1e783a57da14368c685a1cbae99b04e9-3829450069:
+const client = new MercadoPagoConfig({ accessToken: 'COLE_SEU_TOKEN_TEST_AQUI' });
 
-// ENDPOINT 1: Criar Link de Pagamento (Checkout Pro)
 app.post('/api/checkout', async (req: Request, res: Response) => {
   try {
-    // Melhor deteção do URL do seu site (Render)
+    const { email } = req.body;
     const host = req.get('host');
     const protocol = req.headers['x-forwarded-proto'] || req.protocol;
     const baseUrl = `${protocol}://${host}`;
@@ -34,12 +34,11 @@ app.post('/api/checkout', async (req: Request, res: Response) => {
             id: 'plano_pro',
             title: 'Poker Vision AI - Acesso PRO',
             quantity: 1,
-            unit_price: 29.90, // Valor da assinatura
+            unit_price: 29.90,
             currency_id: 'BRL',
           }
         ],
-        // Omitimos o "payer.email" propositalmente para evitar o erro do Mercado Pago
-        // de "O pagador não pode ser o mesmo que o cobrador" durante os seus testes.
+        payer: { email: email },
         back_urls: {
           success: `${baseUrl}?status=success`,
           failure: `${baseUrl}?status=failure`,
@@ -49,10 +48,13 @@ app.post('/api/checkout', async (req: Request, res: Response) => {
       }
     });
 
-    res.json({ init_point: result.init_point });
-  } catch (error) {
+    // Se for chave TESTE, usamos o link Sandbox, senão usamos o de Produção
+    const initUrl = client.accessToken.startsWith('TEST') ? result.sandbox_init_point : result.init_point;
+    res.json({ init_point: initUrl });
+    
+  } catch (error: any) {
     console.error("Erro detalhado no Mercado Pago:", error);
-    res.status(500).json({ error: 'Falha ao gerar link de pagamento.' });
+    res.status(500).json({ error: error.message || 'Falha na API do Mercado Pago.' });
   }
 });
 
@@ -105,7 +107,6 @@ function evaluatePostFlop(heroHand: string[], board: string[]) {
   return { category: 'trash', desc: 'Air (Sem acerto)', isDraw: false };
 }
 
-// ENDPOINT 2: Cálculo de Poker (Motor GTO)
 app.post('/api/poker/calculate', (req: Request, res: Response) => {
   try {
     const { heroHand, board, position, stackDepth, actionToHero, gameMode } = req.body;
