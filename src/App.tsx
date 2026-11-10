@@ -6,17 +6,11 @@ import { DecisionDisplay } from './components/DecisionDisplay';
 import { Zap, RotateCcw, Swords, Coins, Trophy, Lock, Crown, LogOut, Mail, KeyRound } from 'lucide-react';
 
 // --- INTEGRAÇÃO FIREBASE ---
-import { auth } from './firebase';
-import { 
-  signInWithEmailAndPassword, 
-  createUserWithEmailAndPassword, 
-  onAuthStateChanged, 
-  signOut,
-  User
-} from 'firebase/auth';
+import { auth, db } from './firebase';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, User } from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
 
 export const App: React.FC = () => {
-  // --- ESTADOS DE AUTENTICAÇÃO ---
   const [user, setUser] = useState<User | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
@@ -24,7 +18,6 @@ export const App: React.FC = () => {
   const [password, setPassword] = useState('');
   const [authError, setAuthError] = useState('');
 
-  // --- ESTADOS DA APLICAÇÃO ---
   const [isProUser, setIsProUser] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [gameMode, setGameMode] = useState<GameMode>('MTT');
@@ -37,18 +30,33 @@ export const App: React.FC = () => {
   const [decision, setDecision] = useState<PokerDecision | null>(null);
   const [isCalculating, setIsCalculating] = useState(false);
 
-  // 1. MONITORIZAR SESSÃO DO UTILIZADOR
+  // 1. MONITORIZAR SESSÃO E VERIFICAR STATUS PRO NO BANCO DE DADOS
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
+      if (currentUser && currentUser.email) {
+        try {
+          // Procura um documento na coleção 'users' com o nome exato do e-mail do utilizador
+          const userRef = doc(db, 'users', currentUser.email);
+          const userSnap = await getDoc(userRef);
+          
+          if (userSnap.exists() && userSnap.data().isPro === true) {
+            setIsProUser(true);
+          } else {
+            setIsProUser(false);
+          }
+        } catch (error) {
+          console.error("Erro ao verificar banco de dados:", error);
+          setIsProUser(false);
+        }
+      } else {
+        setIsProUser(false);
+      }
       setIsAuthLoading(false);
-      // Simulação Temporária: Se o email for o seu, dá acesso PRO automático
-      if (currentUser?.email === 'seu-email@gmail.com') setIsProUser(true);
     });
     return unsubscribe;
   }, []);
 
-  // 2. FUNÇÃO DE LOGIN / REGISTO
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError('');
@@ -59,16 +67,12 @@ export const App: React.FC = () => {
         await createUserWithEmailAndPassword(auth, email, password);
       }
     } catch (err: any) {
-      setAuthError(err.message.includes('auth/invalid-credential') 
-        ? 'E-mail ou palavra-passe incorretos.' 
-        : 'Erro ao autenticar. Verifique os dados e tente novamente.');
+      setAuthError(err.message.includes('auth/invalid-credential') ? 'E-mail ou palavra-passe incorretos.' : 'Erro ao autenticar.');
     }
   };
 
-  // 3. CONSULTA GTO AO SERVIDOR SEGURO
   useEffect(() => {
-    if (!user) return; // Não calcula se não estiver autenticado
-
+    if (!user) return;
     let isMounted = true;
     const getDecision = async () => {
       if (heroHand.length < 2) {
@@ -79,7 +83,6 @@ export const App: React.FC = () => {
       const result = await fetchFastDecision({ heroHand, board: boardCards, position, stackDepth, actionToHero, gameMode });
       if (isMounted) { setDecision(result); setIsCalculating(false); }
     };
-    
     getDecision();
     return () => { isMounted = false; };
   }, [heroHand, boardCards, position, stackDepth, actionToHero, gameMode, user]);
@@ -96,56 +99,31 @@ export const App: React.FC = () => {
 
   const activePositions: TablePosition[] = gameMode === 'SPIN' ? ['BTN', 'SB', 'BB'] : ['UTG', 'MP', 'CO', 'BTN', 'SB', 'BB'];
 
-  // --- ECRÃ DE CARREGAMENTO INICIAL ---
-  if (isAuthLoading) {
-    return <div className="min-h-screen bg-slate-950 flex items-center justify-center"><Zap className="w-8 h-8 text-amber-400 animate-pulse" /></div>;
-  }
+  if (isAuthLoading) return <div className="min-h-screen bg-slate-950 flex items-center justify-center"><Zap className="w-8 h-8 text-amber-400 animate-pulse" /></div>;
 
-  // --- ECRÃ DE LOGIN / REGISTO ---
   if (!user) {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 select-none">
         <div className="w-full max-w-md bg-[#0c2419] border border-emerald-800/60 rounded-3xl p-8 shadow-2xl">
           <div className="flex justify-center mb-6">
-            <div className="w-16 h-16 rounded-2xl bg-amber-400/20 border border-amber-400 flex items-center justify-center">
-              <Zap className="w-8 h-8 text-amber-400" />
-            </div>
+            <div className="w-16 h-16 rounded-2xl bg-amber-400/20 border border-amber-400 flex items-center justify-center"><Zap className="w-8 h-8 text-amber-400" /></div>
           </div>
           <h1 className="text-2xl font-black text-amber-300 text-center font-serif mb-1">POKER VISION AI</h1>
           <p className="text-sm text-emerald-400/80 text-center mb-8 font-medium">O seu assistente GTO de bolso</p>
-
           <form onSubmit={handleAuth} className="flex flex-col gap-4">
             <div className="relative">
               <Mail className="w-5 h-5 text-emerald-600 absolute left-3 top-3.5" />
-              <input 
-                type="email" 
-                placeholder="E-mail"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full bg-[#05140e] border border-emerald-800/60 rounded-xl py-3 pl-10 pr-4 text-white focus:outline-none focus:border-amber-400 transition-colors"
-                required
-              />
+              <input type="email" placeholder="E-mail" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full bg-[#05140e] border border-emerald-800/60 rounded-xl py-3 pl-10 pr-4 text-white focus:outline-none focus:border-amber-400" required />
             </div>
             <div className="relative">
               <KeyRound className="w-5 h-5 text-emerald-600 absolute left-3 top-3.5" />
-              <input 
-                type="password" 
-                placeholder="Palavra-passe (mín. 6 letras/números)"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full bg-[#05140e] border border-emerald-800/60 rounded-xl py-3 pl-10 pr-4 text-white focus:outline-none focus:border-amber-400 transition-colors"
-                required
-                minLength={6}
-              />
+              <input type="password" placeholder="Palavra-passe (mín. 6 char)" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full bg-[#05140e] border border-emerald-800/60 rounded-xl py-3 pl-10 pr-4 text-white focus:outline-none focus:border-amber-400" required minLength={6} />
             </div>
-            
             {authError && <p className="text-red-400 text-xs font-bold text-center">{authError}</p>}
-
-            <button type="submit" className="w-full py-3.5 mt-2 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-700 text-white font-black uppercase tracking-widest shadow-lg hover:from-emerald-500 hover:to-emerald-600 active:scale-[0.98] transition-all">
+            <button type="submit" className="w-full py-3.5 mt-2 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-700 text-white font-black uppercase tracking-widest shadow-lg hover:from-emerald-500 active:scale-[0.98] transition-all">
               {authMode === 'login' ? 'Entrar' : 'Criar Conta'}
             </button>
           </form>
-
           <div className="mt-6 text-center">
             <button onClick={() => { setAuthMode(authMode === 'login' ? 'register' : 'login'); setAuthError(''); }} className="text-sm text-slate-400 hover:text-amber-400 transition-colors">
               {authMode === 'login' ? 'Não tem conta? Registe-se grátis' : 'Já tem conta? Inicie sessão'}
@@ -156,7 +134,6 @@ export const App: React.FC = () => {
     );
   }
 
-  // --- APLICAÇÃO PRINCIPAL (SÓ PARA LOGADOS) ---
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans select-none pb-12 relative">
       <header className="px-4 pt-3 pb-2 bg-[#0c2419] border-b border-emerald-800/60 shadow-md sticky top-0 z-20">
@@ -173,15 +150,10 @@ export const App: React.FC = () => {
             </div>
           </div>
           <div className="flex gap-2">
-            <button onClick={resetTable} className="p-2 rounded-lg bg-emerald-950 border border-emerald-700 text-emerald-300">
-              <RotateCcw className="w-4 h-4" />
-            </button>
-            <button onClick={() => signOut(auth)} className="p-2 rounded-lg bg-red-950/40 border border-red-900/50 text-red-400">
-              <LogOut className="w-4 h-4" />
-            </button>
+            <button onClick={resetTable} className="p-2 rounded-lg bg-emerald-950 border border-emerald-700 text-emerald-300"><RotateCcw className="w-4 h-4" /></button>
+            <button onClick={() => signOut(auth)} className="p-2 rounded-lg bg-red-950/40 border border-red-900/50 text-red-400"><LogOut className="w-4 h-4" /></button>
           </div>
         </div>
-        
         <div className="flex p-1 bg-black/60 rounded-xl border border-emerald-900/60">
           {[{ id: 'CASH', label: 'CASH', icon: <Coins className="w-3.5 h-3.5" /> }, { id: 'MTT', label: 'MTT / SNG', icon: <Trophy className="w-3.5 h-3.5" /> }, { id: 'SPIN', label: 'SPIN & GO', icon: <Swords className="w-3.5 h-3.5" /> }].map(m => (
             <button key={m.id} onClick={() => handleModeChange(m.id as GameMode)} className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-bold rounded-lg transition-all ${gameMode === m.id ? 'bg-emerald-600 text-white shadow-md' : 'text-emerald-500/70 hover:text-emerald-300'}`}>
@@ -192,7 +164,6 @@ export const App: React.FC = () => {
       </header>
 
       <main className="flex-1 p-3 max-w-md mx-auto w-full flex flex-col gap-3">
-        {/* Bloco 1: Cartas */}
         <div className="bg-[#05140e] border border-emerald-800/80 rounded-2xl p-3 shadow-lg">
           <span className="text-[11px] font-bold text-amber-300 uppercase tracking-wider block mb-2">1. Suas Cartas</span>
           <div onClick={() => { setHeroHand([]); setPickerTarget('hero'); }} className="flex justify-center gap-3 p-3 bg-black/40 rounded-xl border border-dashed border-emerald-700/60 cursor-pointer">
@@ -205,7 +176,6 @@ export const App: React.FC = () => {
           </div>
         </div>
 
-        {/* Bloco 2: Board */}
         <div className="relative bg-[#05140e] border border-emerald-800/80 rounded-2xl p-3 shadow-lg overflow-hidden">
           <div className="flex items-center justify-between mb-2">
             <span className="text-[11px] font-bold text-amber-300 uppercase tracking-wider">2. Board (Pós-Flop)</span>
@@ -229,7 +199,6 @@ export const App: React.FC = () => {
           )}
         </div>
 
-        {/* Blocos 3 e 4 */}
         <div className="bg-[#05140e] border border-emerald-800/80 rounded-2xl p-3 shadow-lg">
           <span className="text-[11px] font-bold text-amber-300 uppercase tracking-wider block mb-2">3. Stack Efetivo</span>
           <div className="grid grid-cols-3 gap-2">
@@ -261,21 +230,19 @@ export const App: React.FC = () => {
         </div>
       </main>
 
-      {/* Modal Paywall */}
       {showUpgradeModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md">
           <div className="bg-gradient-to-b from-emerald-900 to-slate-950 border border-emerald-500/30 w-full max-w-sm rounded-2xl p-6 shadow-2xl text-center">
             <Crown className="w-12 h-12 text-amber-400 mx-auto mb-4" />
             <h2 className="text-2xl font-black text-white mb-2">Desbloqueie o Pós-Flop</h2>
             <div className="flex flex-col gap-3 mt-6">
-              <button onClick={() => { setIsProUser(true); setShowUpgradeModal(false); }} className="w-full py-3 bg-amber-500 text-slate-950 font-black rounded-xl shadow-lg">Simular Pagamento (Teste)</button>
+              <button onClick={() => setShowUpgradeModal(false)} className="w-full py-3 bg-amber-500 text-slate-950 font-black rounded-xl shadow-lg">Integração de Pagamento em Breve</button>
               <button onClick={() => setShowUpgradeModal(false)} className="text-sm font-bold text-slate-400 hover:text-white py-2">Continuar na versão Free</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Modal de Cartas */}
       <CardPickerModal
         isOpen={pickerTarget !== null}
         onClose={() => setPickerTarget(null)}
