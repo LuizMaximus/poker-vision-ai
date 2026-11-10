@@ -29,14 +29,7 @@ if (apiKey) {
   });
 }
 
-// Modelos ordenados para comutação imediata em caso de 503 (Spike de Demanda)
-const FALLBACK_MODELS = [
-  'models/gemini-2.5-flash',
-  'models/gemini-2.5-flash-lite',
-  'models/gemini-3.8-flash',
-];
-
-// Endpoint: Visão computacional rápida com tolerância a 503
+// Endpoint de análise visual otimizado
 app.post('/api/poker/analyze', async (req: Request, res: Response) => {
   try {
     const { imageBase64, mimeType = 'image/jpeg' } = req.body;
@@ -51,8 +44,8 @@ app.post('/api/poker/analyze', async (req: Request, res: Response) => {
 
     const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
 
-    const promptText = `Você é um scanner de visão ultra-rápido para mesas de Texas Hold'em (app Suprema Poker / PPPoker ou tela de PC).
-Analise a imagem da mesa e retorne APENAS um JSON no formato:
+    const promptText = `Você é um leitor ultra-rápido de mesas de Texas Hold'em (app Suprema Poker ou monitor PC).
+Retorne APENAS um JSON:
 {
   "hero_hand": ["Jh", "4s"],
   "board": ["3d", "8d", "7s"],
@@ -61,60 +54,37 @@ Analise a imagem da mesa e retorne APENAS um JSON no formato:
   "effective_stack_bb": 48,
   "active_villains": 2,
   "action_to_hero": "unopened",
-  "confidence_summary": "Hero: Jh 4s no BB | Flop: 3d 8d 7s"
+  "confidence_summary": "Hero no BB com Jh 4s"
 }
-
 Regras:
-1. hero_hand: As 2 cartas na parte inferior central da mesa, junto ao avatar do jogador inferior.
-2. board: Cartas comunitárias no centro do feltro verde (0 no preflop, 3 no flop, 4 no turn, 5 no river).
-3. Ranks: 2-9, T, J, Q, K, A. Naipes: s, h, d, c. Se não ler com certeza, retorne [].
-4. stage: "preflop", "flop", "turn" ou "river".
-5. position: Verifique a tag redonda no jogador inferior ("BB", "SB", ou "D"/BTN). Se não tiver tag explícita, estime: "UTG", "MP", "CO", "BTN", "SB", "BB" ou null.
-6. effective_stack_bb: Localize o valor de Big Blind (ex: "Blinds 10/20" -> BB=20) e o saldo do Hero (ex: 960). Divida o saldo pelo Big Blind (ex: 960 / 20 = 48 BBs). Retorne número inteiro ou null.
-7. active_villains: Quantidade de oponentes que possuem cartas fechadas ativas na mão.
-8. action_to_hero: "unopened", "limp", "raise", "3bet" ou null.
-Retorne SOMENTE o JSON puro, sem markdown.`;
+1. hero_hand: 2 cartas na base inferior da mesa. Ranks: 2-9, T, J, Q, K, A. Naipes: s, h, d, c.
+2. board: Cartas comunitárias centrais (0 a 5 cartas).
+3. stage: "preflop", "flop", "turn" ou "river".
+4. position: Identifique a tag "BB", "SB", "D" (BTN) ou posições padrão.
+5. effective_stack_bb: Saldo do jogador inferior a dividir pelo Big Blind (número inteiro).
+6. active_villains: Oponentes com cartas viradas.`;
 
-    let response: any = null;
-    let lastError: any = null;
+    // Timeout de 13 segundos alinhado com o cliente
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Tempo limite de análise excedido (13s).')), 13000)
+    );
 
-    // Tenta os modelos em sequência; caso ocorra 503 ou 429, passa logo ao seguinte
-    for (const modelName of FALLBACK_MODELS) {
-      try {
-        const candidatePromise = aiClient.models.generateContent({
-          model: modelName,
-          contents: {
-            parts: [
-              { inlineData: { mimeType, data: cleanBase64 } },
-              { text: promptText },
-            ],
-          },
-          config: {
-            responseMimeType: 'application/json',
-            temperature: 0.1,
-          },
-        });
+    const apiPromise = aiClient.models.generateContent({
+      model: 'models/gemini-3.8-flash',
+      contents: {
+        parts: [
+          { inlineData: { mimeType, data: cleanBase64 } },
+          { text: promptText },
+        ],
+      },
+      config: {
+        responseMimeType: 'application/json',
+        temperature: 0.1,
+      },
+    });
 
-        // Timeout individual de 7 segundos por modelo para não estourar o limite da interface
-        const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error(`Timeout no modelo ${modelName}`)), 7000)
-        );
-
-        response = await Promise.race([candidatePromise, timeoutPromise]);
-        if (response?.text) {
-          break; // Resposta obtida com sucesso
-        }
-      } catch (err: any) {
-        lastError = err;
-        console.warn(`Tentativa com ${modelName} falhou: ${err?.message || err}. A tentar modelo alternativo...`);
-      }
-    }
-
-    if (!response || !response.text) {
-      throw lastError || new Error('Nenhum modelo disponível no momento. Tente novamente em instantes.');
-    }
-
-    const rawText = response.text || '{}';
+    const response: any = await Promise.race([apiPromise, timeoutPromise]);
+    const rawText = response?.text || '{}';
     const cleanJson = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
 
     let parsed: any = {};
@@ -168,28 +138,14 @@ app.post('/api/poker/strategic-advice', async (req: Request, res: Response) => {
     const promptText = `Coach GTO Texas Hold'em. Responda SOMENTE JSON com: main_line, sizing_advice, gto_rationale, exploits_and_traps, next_street_plan.
 Spot: Hero: ${Array.isArray(hero_hand) ? hero_hand.join(' ') : '?'} | Board: ${Array.isArray(board) ? board.join(' ') : 'Preflop'} | Estágio: ${stage} | Posição: ${position || 'BTN'} | Stack: ${effective_stack_bb || 40}BB | Vilões: ${active_villains || 1} | Ação: ${action_to_hero || 'unopened'}.`;
 
-    let response: any = null;
-    let lastError: any = null;
-
-    for (const modelName of FALLBACK_MODELS) {
-      try {
-        response = await aiClient.models.generateContent({
-          model: modelName,
-          contents: promptText,
-          config: {
-            responseMimeType: 'application/json',
-            temperature: 0.2,
-          },
-        });
-        if (response?.text) break;
-      } catch (err: any) {
-        lastError = err;
-      }
-    }
-
-    if (!response || !response.text) {
-      throw lastError || new Error('Erro ao gerar conselho.');
-    }
+    const response = await aiClient.models.generateContent({
+      model: 'models/gemini-3.8-flash',
+      contents: promptText,
+      config: {
+        responseMimeType: 'application/json',
+        temperature: 0.2,
+      },
+    });
 
     const parsed = JSON.parse((response.text || '{}').replace(/```json/gi, '').replace(/```/g, '').trim());
     return res.json(parsed);
