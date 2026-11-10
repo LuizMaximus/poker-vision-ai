@@ -3,7 +3,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
-import { MercadoPagoConfig, Preference } from 'mercadopago'; // NOVO: Mercado Pago
+import { MercadoPagoConfig, Preference } from 'mercadopago';
 
 dotenv.config();
 
@@ -21,8 +21,10 @@ const client = new MercadoPagoConfig({ accessToken: 'APP_USR-ac8e4980-cd21-4ec0-
 // ENDPOINT 1: Criar Link de Pagamento (Checkout Pro)
 app.post('/api/checkout', async (req: Request, res: Response) => {
   try {
-    const { email } = req.body;
-    const origin = req.headers.origin || `http://localhost:${PORT}`;
+    // Melhor deteção do URL do seu site (Render)
+    const host = req.get('host');
+    const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+    const baseUrl = `${protocol}://${host}`;
     
     const preference = new Preference(client);
     const result = await preference.create({
@@ -30,17 +32,18 @@ app.post('/api/checkout', async (req: Request, res: Response) => {
         items: [
           {
             id: 'plano_pro',
-            title: 'Poker Vision AI - Acesso PRO (Motor Pós-Flop)',
+            title: 'Poker Vision AI - Acesso PRO',
             quantity: 1,
-            unit_price: 29.90, // <--- ALTRE AQUI O PREÇO DO SEU SAAS
+            unit_price: 29.90, // Valor da assinatura
             currency_id: 'BRL',
           }
         ],
-        payer: { email: email },
+        // Omitimos o "payer.email" propositalmente para evitar o erro do Mercado Pago
+        // de "O pagador não pode ser o mesmo que o cobrador" durante os seus testes.
         back_urls: {
-          success: `${origin}?status=success`,
-          failure: `${origin}?status=failure`,
-          pending: `${origin}?status=pending`
+          success: `${baseUrl}?status=success`,
+          failure: `${baseUrl}?status=failure`,
+          pending: `${baseUrl}?status=pending`
         },
         auto_return: 'approved'
       }
@@ -48,12 +51,12 @@ app.post('/api/checkout', async (req: Request, res: Response) => {
 
     res.json({ init_point: result.init_point });
   } catch (error) {
-    console.error("Erro no Mercado Pago:", error);
+    console.error("Erro detalhado no Mercado Pago:", error);
     res.status(500).json({ error: 'Falha ao gerar link de pagamento.' });
   }
 });
 
-// --- LÓGICA GTO (MANTIDA INTACTA) ---
+// --- LÓGICA GTO MIGRADA PARA O SERVIDOR ---
 const getRankVal = (r: string) => '23456789TJQKA'.indexOf(r.toUpperCase());
 function getHandKey(card1: string, card2: string): string {
   if (!card1 || !card2) return '';
@@ -106,7 +109,6 @@ function evaluatePostFlop(heroHand: string[], board: string[]) {
 app.post('/api/poker/calculate', (req: Request, res: Response) => {
   try {
     const { heroHand, board, position, stackDepth, actionToHero, gameMode } = req.body;
-    const isProUser = true; // No futuro, o servidor vai ler o BD, por agora bloqueamos apenas no Front
     
     if (board && board.length >= 3) {
       const postFlop = evaluatePostFlop(heroHand, board);
