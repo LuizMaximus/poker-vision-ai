@@ -19,7 +19,7 @@ app.use(express.json({ limit: '15mb' }));
 
 // --- 1. CONFIGURAÇÕES ---
 // CHAVE DO MERCADO PAGO ATUALIZADA:
-const client = new MercadoPagoConfig({ accessToken: 'APP_USR-6049645254760093-111012-1e783a57da14368c685a1cbae99b04e9-3829450069' });
+const client = new MercadoPagoConfig({ accessToken: 'APP_USR-930320636272567-111012-ee53ca4a31a8da40aa76d650225c4cb4-280571635' });
 
 // CHAVES DO FIREBASE NO SERVIDOR
 const firebaseConfig = {
