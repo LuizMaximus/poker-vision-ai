@@ -3,16 +3,17 @@ import { TablePosition } from './utils/pokerTypes';
 import { calculateFastDecision, StackDepth } from './utils/pokerEngine';
 import { CardPickerModal } from './components/CardPickerModal';
 import { DecisionDisplay } from './components/DecisionDisplay';
-import { ShieldCheck, Zap, RotateCcw } from 'lucide-react';
+import { Zap, RotateCcw } from 'lucide-react';
 
 export const App: React.FC = () => {
-  const [heroHand, setHeroHand] = useState<string[]>(['Ah', 'Kd']);
+  // Inicia vazio para forçar a escolha da mão real
+  const [heroHand, setHeroHand] = useState<string[]>([]);
   const [position, setPosition] = useState<TablePosition>('BTN');
   const [stackDepth, setStackDepth] = useState<StackDepth>('medium');
   const [actionToHero, setActionToHero] = useState<'unopened' | 'limp' | 'raise' | '3bet'>('unopened');
   const [isCardPickerOpen, setIsCardPickerOpen] = useState(false);
 
-  // Cálculo 100% instantâneo no navegador (0ms)
+  // Cálculo instantâneo
   const decision = useMemo(() => {
     return calculateFastDecision({
       heroHand,
@@ -43,7 +44,7 @@ export const App: React.FC = () => {
             <h1 className="text-base font-black text-amber-300 font-serif leading-none tracking-wide">
               POKER VISION GTO
             </h1>
-            <span className="text-[10px] text-emerald-400 font-medium">Modo Ultra-Rápido 100% Manual</span>
+            <span className="text-[10px] text-emerald-400 font-medium">Modo Tático Manual (0ms)</span>
           </div>
         </div>
 
@@ -58,17 +59,20 @@ export const App: React.FC = () => {
 
       {/* Conteúdo Principal */}
       <main className="flex-1 p-3 max-w-md mx-auto w-full flex flex-col gap-3">
-        {/* Bloco 1: A Mão do Hero (Toque para Mudar) */}
+        
+        {/* Bloco 1: A Mão do Hero */}
         <div className="bg-[#05140e] border border-emerald-800/80 rounded-2xl p-3 shadow-lg">
           <div className="flex items-center justify-between mb-2">
             <span className="text-[11px] font-bold text-amber-300 uppercase tracking-wider">
               1. Suas Cartas (Hero)
             </span>
-            <span className="text-[10px] text-emerald-400">Toque nas cartas para alterar</span>
           </div>
 
           <div
-            onClick={() => setIsCardPickerOpen(true)}
+            onClick={() => {
+              setHeroHand([]); // Limpa as cartas imediatamente ao clicar para trocar
+              setIsCardPickerOpen(true);
+            }}
             className="flex items-center justify-center gap-3 p-3 bg-black/40 rounded-xl border border-dashed border-emerald-700/60 hover:border-amber-400 cursor-pointer active:scale-95 transition-all"
           >
             {heroHand.length === 2 ? (
@@ -86,14 +90,14 @@ export const App: React.FC = () => {
                 </div>
               ))
             ) : (
-              <div className="py-4 text-emerald-400 font-bold text-sm flex items-center gap-2">
+              <div className="py-4 text-amber-400 font-bold text-sm flex items-center gap-2">
                 <span>Toque aqui para escolher suas 2 cartas</span>
               </div>
             )}
           </div>
         </div>
 
-        {/* Bloco 2: Faixa de Stack (Low, Medium, Deep) */}
+        {/* Bloco 2: Faixa de Stack */}
         <div className="bg-[#05140e] border border-emerald-800/80 rounded-2xl p-3 shadow-lg">
           <span className="text-[11px] font-bold text-amber-300 uppercase tracking-wider block mb-2">
             2. Tamanho do Stack
@@ -122,7 +126,7 @@ export const App: React.FC = () => {
           </div>
         </div>
 
-        {/* Bloco 3: Posição na Mesa */}
+        {/* Bloco 3: Posição */}
         <div className="bg-[#05140e] border border-emerald-800/80 rounded-2xl p-3 shadow-lg">
           <span className="text-[11px] font-bold text-amber-300 uppercase tracking-wider block mb-2">
             3. Sua Posição (Hero)
@@ -144,7 +148,7 @@ export const App: React.FC = () => {
           </div>
         </div>
 
-        {/* Bloco 4: Ação até Você */}
+        {/* Bloco 4: Ação */}
         <div className="bg-[#05140e] border border-emerald-800/80 rounded-2xl p-3 shadow-lg">
           <span className="text-[11px] font-bold text-amber-300 uppercase tracking-wider block mb-2">
             4. Ação Prévia da Mesa
@@ -173,28 +177,32 @@ export const App: React.FC = () => {
           </div>
         </div>
 
-        {/* Veredito GTO Instantâneo */}
+        {/* Veredito */}
         <div className="mt-1">
           <DecisionDisplay decision={decision} />
         </div>
       </main>
 
-      {/* Modal de Escolha de Cartas */}
+      {/* Modal Inteligente de Cartas */}
       <CardPickerModal
         isOpen={isCardPickerOpen}
         onClose={() => setIsCardPickerOpen(false)}
         selectedCards={heroHand}
         onSelectCard={(c) => {
           if (heroHand.includes(c)) {
-            setHeroHand(heroHand.filter((x) => x !== c));
-          } else if (heroHand.length < 2) {
+            setHeroHand(heroHand.filter((x) => x !== c)); // Remove se já estiver selecionada
+          } else {
             const updated = [...heroHand, c];
             setHeroHand(updated);
-            if (updated.length === 2) setIsCardPickerOpen(false);
+            
+            // Quando a 2ª carta for escolhida, fecha o modal automaticamente com um pequeno delay visual
+            if (updated.length === 2) {
+              setTimeout(() => setIsCardPickerOpen(false), 150);
+            }
           }
         }}
         maxCards={2}
-        title="Selecione suas 2 Cartas (Hero)"
+        title="Selecione Suas 2 Cartas"
       />
     </div>
   );
