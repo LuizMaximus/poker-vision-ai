@@ -63,7 +63,7 @@ Analise detalhadamente esta imagem de uma mesa de poker (física ao vivo ou onli
 `;
 
     const response = await aiClient.models.generateContent({
-      model: 'gemini-3.8-flash',
+      model: 'gemini-2.5-flash',
       contents: {
         parts: [
           {
@@ -189,7 +189,7 @@ Responda em português com formato JSON estruturado com os seguintes campos:
 `;
 
     const response = await aiClient.models.generateContent({
-      model: 'gemini-3.8-flash',
+      model: 'gemini-2.5-flash',
       contents: promptText,
       config: {
         responseMimeType: 'application/json',
