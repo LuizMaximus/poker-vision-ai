@@ -1,11 +1,10 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { TablePosition, PokerDecision } from './utils/pokerTypes';
 import { fetchFastDecision, StackDepth, GameMode } from './utils/pokerEngine';
 import { CardPickerModal } from './components/CardPickerModal';
 import { DecisionDisplay } from './components/DecisionDisplay';
-import { Zap, RotateCcw, Swords, Coins, Trophy, Lock, Crown, LogOut, Mail, KeyRound } from 'lucide-react';
+import { Zap, RotateCcw, Swords, Coins, Trophy, Lock, Crown, LogOut, Mail, KeyRound, Loader2 } from 'lucide-react'; // Adicionado Loader2
 
-// --- INTEGRAÇÃO FIREBASE ---
 import { auth, db } from './firebase';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut, User } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
@@ -20,6 +19,8 @@ export const App: React.FC = () => {
 
   const [isProUser, setIsProUser] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [isCheckoutLoading, setIsCheckoutLoading] = useState(false); // NOVO: Estado de loading do pagamento
+
   const [gameMode, setGameMode] = useState<GameMode>('MTT');
   const [heroHand, setHeroHand] = useState<string[]>([]);
   const [boardCards, setBoardCards] = useState<string[]>([]);
@@ -30,28 +31,17 @@ export const App: React.FC = () => {
   const [decision, setDecision] = useState<PokerDecision | null>(null);
   const [isCalculating, setIsCalculating] = useState(false);
 
-  // 1. MONITORIZAR SESSÃO E VERIFICAR STATUS PRO NO BANCO DE DADOS
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
       if (currentUser && currentUser.email) {
         try {
-          // Procura um documento na coleção 'users' com o nome exato do e-mail do utilizador
           const userRef = doc(db, 'users', currentUser.email);
           const userSnap = await getDoc(userRef);
-          
-          if (userSnap.exists() && userSnap.data().isPro === true) {
-            setIsProUser(true);
-          } else {
-            setIsProUser(false);
-          }
-        } catch (error) {
-          console.error("Erro ao verificar banco de dados:", error);
-          setIsProUser(false);
-        }
-      } else {
-        setIsProUser(false);
-      }
+          if (userSnap.exists() && userSnap.data().isPro === true) setIsProUser(true);
+          else setIsProUser(false);
+        } catch (error) { setIsProUser(false); }
+      } else setIsProUser(false);
       setIsAuthLoading(false);
     });
     return unsubscribe;
@@ -61,24 +51,39 @@ export const App: React.FC = () => {
     e.preventDefault();
     setAuthError('');
     try {
-      if (authMode === 'login') {
-        await signInWithEmailAndPassword(auth, email, password);
-      } else {
-        await createUserWithEmailAndPassword(auth, email, password);
-      }
+      if (authMode === 'login') await signInWithEmailAndPassword(auth, email, password);
+      else await createUserWithEmailAndPassword(auth, email, password);
     } catch (err: any) {
-      setAuthError(err.message.includes('auth/invalid-credential') ? 'E-mail ou palavra-passe incorretos.' : 'Erro ao autenticar.');
+      setAuthError(err.message.includes('auth/invalid-credential') ? 'Dados incorretos.' : 'Erro ao autenticar.');
     }
+  };
+
+  // --- NOVO: FUNÇÃO QUE CHAMA O MERCADO PAGO ---
+  const handlePayment = async () => {
+    setIsCheckoutLoading(true);
+    try {
+      const res = await fetch('/api/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: user?.email })
+      });
+      const data = await res.json();
+      if (data.init_point) {
+        window.location.href = data.init_point; // Redireciona o utilizador para pagar!
+      } else {
+        alert("Erro ao conectar com a operadora de pagamentos.");
+      }
+    } catch (error) {
+      console.error(error);
+    }
+    setIsCheckoutLoading(false);
   };
 
   useEffect(() => {
     if (!user) return;
     let isMounted = true;
     const getDecision = async () => {
-      if (heroHand.length < 2) {
-        setDecision({ action: 'AGUARDANDO', confidence: 0, sizing: '-', rationale: 'Selecione as 2 cartas do Hero.', evEstimate: 0, riskLevel: 'LOW' });
-        return;
-      }
+      if (heroHand.length < 2) { setDecision({ action: 'AGUARDANDO', confidence: 0, sizing: '-', rationale: 'Selecione as 2 cartas.', evEstimate: 0, riskLevel: 'LOW' }); return; }
       setIsCalculating(true);
       const result = await fetchFastDecision({ heroHand, board: boardCards, position, stackDepth, actionToHero, gameMode });
       if (isMounted) { setDecision(result); setIsCalculating(false); }
@@ -90,13 +95,7 @@ export const App: React.FC = () => {
   const resetTable = () => { setHeroHand([]); setBoardCards([]); setActionToHero('unopened'); };
   const handlePositionChange = (pos: TablePosition) => { setPosition(pos); if (pos === 'BB' && actionToHero === 'unopened') setActionToHero('limp'); };
   const handleActionChange = (act: 'unopened' | 'limp' | 'raise' | '3bet') => { setActionToHero(act); if (act === 'unopened' && position === 'BB') setPosition('SB'); };
-  const handleModeChange = (mode: GameMode) => {
-    setGameMode(mode); setHeroHand([]); setBoardCards([]);
-    if (mode === 'SPIN') { setPosition('BTN'); setStackDepth('low'); }
-    else if (mode === 'CASH') { setPosition('BTN'); setStackDepth('deep'); }
-    else { setPosition('BTN'); setStackDepth('medium'); }
-  };
-
+  const handleModeChange = (mode: GameMode) => { setGameMode(mode); setHeroHand([]); setBoardCards([]); if (mode === 'SPIN') { setPosition('BTN'); setStackDepth('low'); } else if (mode === 'CASH') { setPosition('BTN'); setStackDepth('deep'); } else { setPosition('BTN'); setStackDepth('medium'); } };
   const activePositions: TablePosition[] = gameMode === 'SPIN' ? ['BTN', 'SB', 'BB'] : ['UTG', 'MP', 'CO', 'BTN', 'SB', 'BB'];
 
   if (isAuthLoading) return <div className="min-h-screen bg-slate-950 flex items-center justify-center"><Zap className="w-8 h-8 text-amber-400 animate-pulse" /></div>;
@@ -117,10 +116,10 @@ export const App: React.FC = () => {
             </div>
             <div className="relative">
               <KeyRound className="w-5 h-5 text-emerald-600 absolute left-3 top-3.5" />
-              <input type="password" placeholder="Palavra-passe (mín. 6 char)" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full bg-[#05140e] border border-emerald-800/60 rounded-xl py-3 pl-10 pr-4 text-white focus:outline-none focus:border-amber-400" required minLength={6} />
+              <input type="password" placeholder="Palavra-passe" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full bg-[#05140e] border border-emerald-800/60 rounded-xl py-3 pl-10 pr-4 text-white focus:outline-none focus:border-amber-400" required minLength={6} />
             </div>
             {authError && <p className="text-red-400 text-xs font-bold text-center">{authError}</p>}
-            <button type="submit" className="w-full py-3.5 mt-2 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-700 text-white font-black uppercase tracking-widest shadow-lg hover:from-emerald-500 active:scale-[0.98] transition-all">
+            <button type="submit" className="w-full py-3.5 mt-2 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-700 text-white font-black uppercase tracking-widest shadow-lg active:scale-[0.98] transition-all">
               {authMode === 'login' ? 'Entrar' : 'Criar Conta'}
             </button>
           </form>
@@ -156,9 +155,7 @@ export const App: React.FC = () => {
         </div>
         <div className="flex p-1 bg-black/60 rounded-xl border border-emerald-900/60">
           {[{ id: 'CASH', label: 'CASH', icon: <Coins className="w-3.5 h-3.5" /> }, { id: 'MTT', label: 'MTT / SNG', icon: <Trophy className="w-3.5 h-3.5" /> }, { id: 'SPIN', label: 'SPIN & GO', icon: <Swords className="w-3.5 h-3.5" /> }].map(m => (
-            <button key={m.id} onClick={() => handleModeChange(m.id as GameMode)} className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-bold rounded-lg transition-all ${gameMode === m.id ? 'bg-emerald-600 text-white shadow-md' : 'text-emerald-500/70 hover:text-emerald-300'}`}>
-              {m.icon} {m.label}
-            </button>
+            <button key={m.id} onClick={() => handleModeChange(m.id as GameMode)} className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-bold rounded-lg transition-all ${gameMode === m.id ? 'bg-emerald-600 text-white shadow-md' : 'text-emerald-500/70 hover:text-emerald-300'}`}>{m.icon} {m.label}</button>
           ))}
         </div>
       </header>
@@ -185,10 +182,7 @@ export const App: React.FC = () => {
             {[1, 2, 3, 4, 5].map((_, i) => {
               const c = boardCards[i];
               return c ? (
-                <div key={i} className="w-11 h-16 bg-white text-slate-900 rounded-md flex flex-col items-center justify-between p-1 font-bold text-sm">
-                  <span className={c.includes('h') || c.includes('d') ? 'text-red-600' : ''}>{c[0]}</span>
-                  <span className={c.includes('h') || c.includes('d') ? 'text-red-600' : ''}>{c.includes('s') ? '♠' : c.includes('h') ? '♥' : c.includes('d') ? '♦' : '♣'}</span>
-                </div>
+                <div key={i} className="w-11 h-16 bg-white text-slate-900 rounded-md flex flex-col items-center justify-between p-1 font-bold text-sm"><span className={c.includes('h') || c.includes('d') ? 'text-red-600' : ''}>{c[0]}</span><span className={c.includes('h') || c.includes('d') ? 'text-red-600' : ''}>{c.includes('s') ? '♠' : c.includes('h') ? '♥' : c.includes('d') ? '♦' : '♣'}</span></div>
               ) : <div key={i} className="w-11 h-16 bg-black/40 rounded-md border border-slate-700 flex items-center justify-center text-slate-600 text-xs">{i < 3 ? 'F' : i === 3 ? 'T' : 'R'}</div>;
             })}
           </div>
@@ -230,35 +224,30 @@ export const App: React.FC = () => {
         </div>
       </main>
 
+      {/* --- MODAL PAYWALL ATUALIZADO --- */}
       {showUpgradeModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md">
           <div className="bg-gradient-to-b from-emerald-900 to-slate-950 border border-emerald-500/30 w-full max-w-sm rounded-2xl p-6 shadow-2xl text-center">
             <Crown className="w-12 h-12 text-amber-400 mx-auto mb-4" />
             <h2 className="text-2xl font-black text-white mb-2">Desbloqueie o Pós-Flop</h2>
-            <div className="flex flex-col gap-3 mt-6">
-              <button onClick={() => setShowUpgradeModal(false)} className="w-full py-3 bg-amber-500 text-slate-950 font-black rounded-xl shadow-lg">Integração de Pagamento em Breve</button>
-              <button onClick={() => setShowUpgradeModal(false)} className="text-sm font-bold text-slate-400 hover:text-white py-2">Continuar na versão Free</button>
+            <p className="text-slate-300 text-xs mb-6">Receba as decisões matemáticas exatas (Top Pairs, Draws) com o motor PRO.</p>
+            <div className="flex flex-col gap-3">
+              <button 
+                onClick={handlePayment} 
+                disabled={isCheckoutLoading}
+                className="w-full py-3.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl shadow-lg flex items-center justify-center gap-2"
+              >
+                {isCheckoutLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Assinar PRO (R$ 29,90)'}
+              </button>
+              <button onClick={() => setShowUpgradeModal(false)} className="text-sm font-bold text-slate-400 hover:text-white py-2">
+                Continuar na versão Free
+              </button>
             </div>
           </div>
         </div>
       )}
 
-      <CardPickerModal
-        isOpen={pickerTarget !== null}
-        onClose={() => setPickerTarget(null)}
-        selectedCards={pickerTarget === 'hero' ? heroHand : boardCards}
-        onSelectCard={(c) => {
-          if (pickerTarget === 'hero') {
-            if (heroHand.includes(c)) setHeroHand(heroHand.filter(x => x !== c));
-            else { const u = [...heroHand, c]; setHeroHand(u); if (u.length === 2) setTimeout(() => setPickerTarget(null), 150); }
-          } else {
-            if (boardCards.includes(c)) setBoardCards(boardCards.filter(x => x !== c));
-            else { const u = [...boardCards, c]; if (u.length <= 5) setBoardCards(u); }
-          }
-        }}
-        maxCards={pickerTarget === 'hero' ? 2 : 5}
-        title={pickerTarget === 'hero' ? "Cartas do Hero" : "Board"}
-      />
+      <CardPickerModal isOpen={pickerTarget !== null} onClose={() => setPickerTarget(null)} selectedCards={pickerTarget === 'hero' ? heroHand : boardCards} onSelectCard={(c) => { if (pickerTarget === 'hero') { if (heroHand.includes(c)) setHeroHand(heroHand.filter(x => x !== c)); else { const u = [...heroHand, c]; setHeroHand(u); if (u.length === 2) setTimeout(() => setPickerTarget(null), 150); } } else { if (boardCards.includes(c)) setBoardCards(boardCards.filter(x => x !== c)); else { const u = [...boardCards, c]; if (u.length <= 5) setBoardCards(u); } } }} maxCards={pickerTarget === 'hero' ? 2 : 5} title={pickerTarget === 'hero' ? "Cartas do Hero" : "Board"} />
     </div>
   );
 };
