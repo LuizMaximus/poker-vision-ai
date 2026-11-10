@@ -1,14 +1,32 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { TablePosition, PokerDecision } from './utils/pokerTypes';
 import { fetchFastDecision, StackDepth, GameMode } from './utils/pokerEngine';
 import { CardPickerModal } from './components/CardPickerModal';
 import { DecisionDisplay } from './components/DecisionDisplay';
-import { Zap, RotateCcw, Swords, Coins, Trophy, Lock, Crown } from 'lucide-react';
+import { Zap, RotateCcw, Swords, Coins, Trophy, Lock, Crown, LogOut, Mail, KeyRound } from 'lucide-react';
+
+// --- INTEGRAÇÃO FIREBASE ---
+import { auth } from './firebase';
+import { 
+  signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword, 
+  onAuthStateChanged, 
+  signOut,
+  User
+} from 'firebase/auth';
 
 export const App: React.FC = () => {
+  // --- ESTADOS DE AUTENTICAÇÃO ---
+  const [user, setUser] = useState<User | null>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [authError, setAuthError] = useState('');
+
+  // --- ESTADOS DA APLICAÇÃO ---
   const [isProUser, setIsProUser] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
-
   const [gameMode, setGameMode] = useState<GameMode>('MTT');
   const [heroHand, setHeroHand] = useState<string[]>([]);
   const [boardCards, setBoardCards] = useState<string[]>([]);
@@ -16,68 +34,131 @@ export const App: React.FC = () => {
   const [stackDepth, setStackDepth] = useState<StackDepth>('medium');
   const [actionToHero, setActionToHero] = useState<'unopened' | 'limp' | 'raise' | '3bet'>('unopened');
   const [pickerTarget, setPickerTarget] = useState<'hero' | 'board' | null>(null);
-
-  // Estado para armazenar a resposta que agora vem do servidor
   const [decision, setDecision] = useState<PokerDecision | null>(null);
   const [isCalculating, setIsCalculating] = useState(false);
 
-  // EFEITO DE CONSULTA AO SERVIDOR
+  // 1. MONITORIZAR SESSÃO DO UTILIZADOR
   useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setIsAuthLoading(false);
+      // Simulação Temporária: Se o email for o seu, dá acesso PRO automático
+      if (currentUser?.email === 'seu-email@gmail.com') setIsProUser(true);
+    });
+    return unsubscribe;
+  }, []);
+
+  // 2. FUNÇÃO DE LOGIN / REGISTO
+  const handleAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError('');
+    try {
+      if (authMode === 'login') {
+        await signInWithEmailAndPassword(auth, email, password);
+      } else {
+        await createUserWithEmailAndPassword(auth, email, password);
+      }
+    } catch (err: any) {
+      setAuthError(err.message.includes('auth/invalid-credential') 
+        ? 'E-mail ou palavra-passe incorretos.' 
+        : 'Erro ao autenticar. Verifique os dados e tente novamente.');
+    }
+  };
+
+  // 3. CONSULTA GTO AO SERVIDOR SEGURO
+  useEffect(() => {
+    if (!user) return; // Não calcula se não estiver autenticado
+
     let isMounted = true;
-    
     const getDecision = async () => {
       if (heroHand.length < 2) {
         setDecision({ action: 'AGUARDANDO', confidence: 0, sizing: '-', rationale: 'Selecione as 2 cartas do Hero.', evEstimate: 0, riskLevel: 'LOW' });
         return;
       }
-      
       setIsCalculating(true);
-      const result = await fetchFastDecision({
-        heroHand, board: boardCards, position, stackDepth, actionToHero, gameMode
-      });
-      
-      if (isMounted) {
-        setDecision(result);
-        setIsCalculating(false);
-      }
+      const result = await fetchFastDecision({ heroHand, board: boardCards, position, stackDepth, actionToHero, gameMode });
+      if (isMounted) { setDecision(result); setIsCalculating(false); }
     };
     
     getDecision();
     return () => { isMounted = false; };
-  }, [heroHand, boardCards, position, stackDepth, actionToHero, gameMode]);
+  }, [heroHand, boardCards, position, stackDepth, actionToHero, gameMode, user]);
 
-  const handlePositionChange = (pos: TablePosition) => {
-    setPosition(pos);
-    if (pos === 'BB' && actionToHero === 'unopened') setActionToHero('limp');
-  };
-
-  const handleActionChange = (act: 'unopened' | 'limp' | 'raise' | '3bet') => {
-    setActionToHero(act);
-    if (act === 'unopened' && position === 'BB') setPosition('SB');
-  };
-
-  const resetTable = () => {
-    setHeroHand([]);
-    setBoardCards([]);
-    setActionToHero('unopened');
-  };
-
+  const resetTable = () => { setHeroHand([]); setBoardCards([]); setActionToHero('unopened'); };
+  const handlePositionChange = (pos: TablePosition) => { setPosition(pos); if (pos === 'BB' && actionToHero === 'unopened') setActionToHero('limp'); };
+  const handleActionChange = (act: 'unopened' | 'limp' | 'raise' | '3bet') => { setActionToHero(act); if (act === 'unopened' && position === 'BB') setPosition('SB'); };
   const handleModeChange = (mode: GameMode) => {
-    setGameMode(mode);
-    setHeroHand([]);
-    setBoardCards([]);
+    setGameMode(mode); setHeroHand([]); setBoardCards([]);
     if (mode === 'SPIN') { setPosition('BTN'); setStackDepth('low'); }
     else if (mode === 'CASH') { setPosition('BTN'); setStackDepth('deep'); }
     else { setPosition('BTN'); setStackDepth('medium'); }
   };
 
-  const activePositions: TablePosition[] = gameMode === 'SPIN' 
-    ? ['BTN', 'SB', 'BB'] 
-    : ['UTG', 'MP', 'CO', 'BTN', 'SB', 'BB'];
+  const activePositions: TablePosition[] = gameMode === 'SPIN' ? ['BTN', 'SB', 'BB'] : ['UTG', 'MP', 'CO', 'BTN', 'SB', 'BB'];
 
+  // --- ECRÃ DE CARREGAMENTO INICIAL ---
+  if (isAuthLoading) {
+    return <div className="min-h-screen bg-slate-950 flex items-center justify-center"><Zap className="w-8 h-8 text-amber-400 animate-pulse" /></div>;
+  }
+
+  // --- ECRÃ DE LOGIN / REGISTO ---
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 select-none">
+        <div className="w-full max-w-md bg-[#0c2419] border border-emerald-800/60 rounded-3xl p-8 shadow-2xl">
+          <div className="flex justify-center mb-6">
+            <div className="w-16 h-16 rounded-2xl bg-amber-400/20 border border-amber-400 flex items-center justify-center">
+              <Zap className="w-8 h-8 text-amber-400" />
+            </div>
+          </div>
+          <h1 className="text-2xl font-black text-amber-300 text-center font-serif mb-1">POKER VISION AI</h1>
+          <p className="text-sm text-emerald-400/80 text-center mb-8 font-medium">O seu assistente GTO de bolso</p>
+
+          <form onSubmit={handleAuth} className="flex flex-col gap-4">
+            <div className="relative">
+              <Mail className="w-5 h-5 text-emerald-600 absolute left-3 top-3.5" />
+              <input 
+                type="email" 
+                placeholder="E-mail"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full bg-[#05140e] border border-emerald-800/60 rounded-xl py-3 pl-10 pr-4 text-white focus:outline-none focus:border-amber-400 transition-colors"
+                required
+              />
+            </div>
+            <div className="relative">
+              <KeyRound className="w-5 h-5 text-emerald-600 absolute left-3 top-3.5" />
+              <input 
+                type="password" 
+                placeholder="Palavra-passe (mín. 6 letras/números)"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full bg-[#05140e] border border-emerald-800/60 rounded-xl py-3 pl-10 pr-4 text-white focus:outline-none focus:border-amber-400 transition-colors"
+                required
+                minLength={6}
+              />
+            </div>
+            
+            {authError && <p className="text-red-400 text-xs font-bold text-center">{authError}</p>}
+
+            <button type="submit" className="w-full py-3.5 mt-2 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-700 text-white font-black uppercase tracking-widest shadow-lg hover:from-emerald-500 hover:to-emerald-600 active:scale-[0.98] transition-all">
+              {authMode === 'login' ? 'Entrar' : 'Criar Conta'}
+            </button>
+          </form>
+
+          <div className="mt-6 text-center">
+            <button onClick={() => { setAuthMode(authMode === 'login' ? 'register' : 'login'); setAuthError(''); }} className="text-sm text-slate-400 hover:text-amber-400 transition-colors">
+              {authMode === 'login' ? 'Não tem conta? Registe-se grátis' : 'Já tem conta? Inicie sessão'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // --- APLICAÇÃO PRINCIPAL (SÓ PARA LOGADOS) ---
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans select-none pb-12 relative">
-      {/* Top Header */}
       <header className="px-4 pt-3 pb-2 bg-[#0c2419] border-b border-emerald-800/60 shadow-md sticky top-0 z-20">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
@@ -88,12 +169,17 @@ export const App: React.FC = () => {
               <h1 className="text-base font-black text-amber-300 font-serif leading-none flex items-center gap-1">
                 POKER VISION {isProUser ? <Crown className="w-4 h-4 text-amber-400" /> : <span className="px-1.5 py-0.5 bg-slate-800 text-[9px] rounded text-slate-400">FREE</span>}
               </h1>
-              <span className="text-[10px] text-emerald-400 font-medium">Motor Protegido</span>
+              <span className="text-[10px] text-emerald-400 font-medium truncate max-w-[140px] block">{user.email}</span>
             </div>
           </div>
-          <button onClick={resetTable} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-950 border border-emerald-700 text-xs font-semibold text-emerald-300">
-            <RotateCcw className="w-3.5 h-3.5" /> <span>Limpar</span>
-          </button>
+          <div className="flex gap-2">
+            <button onClick={resetTable} className="p-2 rounded-lg bg-emerald-950 border border-emerald-700 text-emerald-300">
+              <RotateCcw className="w-4 h-4" />
+            </button>
+            <button onClick={() => signOut(auth)} className="p-2 rounded-lg bg-red-950/40 border border-red-900/50 text-red-400">
+              <LogOut className="w-4 h-4" />
+            </button>
+          </div>
         </div>
         
         <div className="flex p-1 bg-black/60 rounded-xl border border-emerald-900/60">
@@ -105,7 +191,6 @@ export const App: React.FC = () => {
         </div>
       </header>
 
-      {/* Main Content */}
       <main className="flex-1 p-3 max-w-md mx-auto w-full flex flex-col gap-3">
         {/* Bloco 1: Cartas */}
         <div className="bg-[#05140e] border border-emerald-800/80 rounded-2xl p-3 shadow-lg">
@@ -171,7 +256,6 @@ export const App: React.FC = () => {
           </div>
         </div>
 
-        {/* Veredito GTO */}
         <div className={`mt-1 mb-8 transition-opacity duration-200 ${isCalculating ? 'opacity-50' : 'opacity-100'}`}>
           <DecisionDisplay decision={decision} />
         </div>
@@ -184,7 +268,7 @@ export const App: React.FC = () => {
             <Crown className="w-12 h-12 text-amber-400 mx-auto mb-4" />
             <h2 className="text-2xl font-black text-white mb-2">Desbloqueie o Pós-Flop</h2>
             <div className="flex flex-col gap-3 mt-6">
-              <button onClick={() => { setIsProUser(true); setShowUpgradeModal(false); }} className="w-full py-3 bg-amber-500 text-slate-950 font-black rounded-xl shadow-lg">Assinar Agora (Simulação)</button>
+              <button onClick={() => { setIsProUser(true); setShowUpgradeModal(false); }} className="w-full py-3 bg-amber-500 text-slate-950 font-black rounded-xl shadow-lg">Simular Pagamento (Teste)</button>
               <button onClick={() => setShowUpgradeModal(false)} className="text-sm font-bold text-slate-400 hover:text-white py-2">Continuar na versão Free</button>
             </div>
           </div>
