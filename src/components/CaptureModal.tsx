@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { Camera, Upload, Sparkles, X, RefreshCw, AlertCircle } from 'lucide-react';
+import { Camera, Upload, RefreshCw, X, AlertCircle } from 'lucide-react';
 import { SAMPLE_SCENARIOS } from '../utils/sampleTables';
 import { SampleScenario } from '../utils/pokerTypes';
 
@@ -25,7 +25,6 @@ export const CaptureModal: React.FC<CaptureModalProps> = ({
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
-  // Stop camera when modal closes or unmounts
   useEffect(() => {
     if (!isOpen || !useLiveCamera) {
       if (streamRef.current) {
@@ -49,24 +48,39 @@ export const CaptureModal: React.FC<CaptureModalProps> = ({
       }
       setUseLiveCamera(true);
     } catch (err: any) {
-      console.warn('Live camera access failed, falling back to camera input:', err);
-      setCameraError('Câmera direta não permitida neste ambiente. Use o botão Tirar Foto.');
+      console.warn('Câmera direta indisponível, usando seletor nativo:', err);
+      setCameraError('Câmera direta indisponível. Utilize o botão "Tirar Foto da Mesa".');
       setUseLiveCamera(false);
-      // Trigger native camera input
       cameraInputRef.current?.click();
     }
   };
 
+  // Captura pelo Viewfinder com compressão para 800px
   const takeSnapshot = () => {
     if (!videoRef.current) return;
     const canvas = document.createElement('canvas');
-    canvas.width = videoRef.current.videoWidth || 640;
-    canvas.height = videoRef.current.videoHeight || 480;
+    const vWidth = videoRef.current.videoWidth || 640;
+    const vHeight = videoRef.current.videoHeight || 480;
+
+    const MAX_DIM = 800;
+    let width = vWidth;
+    let height = vHeight;
+
+    if (width > height && width > MAX_DIM) {
+      height *= MAX_DIM / width;
+      width = MAX_DIM;
+    } else if (height > MAX_DIM) {
+      width *= MAX_DIM / height;
+      height = MAX_DIM;
+    }
+
+    canvas.width = width;
+    canvas.height = height;
     const ctx = canvas.getContext('2d');
     if (ctx) {
-      ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-      // stop stream
+      ctx.drawImage(videoRef.current, 0, 0, width, height);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.65);
+
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((t) => t.stop());
         streamRef.current = null;
@@ -76,6 +90,7 @@ export const CaptureModal: React.FC<CaptureModalProps> = ({
     }
   };
 
+  // Upload ou captura nativa com compressão para 800px
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -114,6 +129,7 @@ export const CaptureModal: React.FC<CaptureModalProps> = ({
       img.src = event.target?.result as string;
     };
     reader.readAsDataURL(file);
+    e.target.value = '';
   };
 
   if (!isOpen) return null;
@@ -126,7 +142,6 @@ export const CaptureModal: React.FC<CaptureModalProps> = ({
       className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/85 backdrop-blur-md animate-in fade-in"
     >
       <div className="w-full max-w-lg bg-gradient-to-b from-[#0c2419] to-[#05140e] border border-amber-400/40 rounded-t-3xl sm:rounded-2xl p-5 shadow-2xl text-slate-100 flex flex-col gap-4 max-h-[92vh] overflow-y-auto">
-        {/* Header */}
         <div className="flex items-center justify-between pb-3 border-b border-emerald-800/60">
           <div className="flex items-center gap-2">
             <Camera className="w-5 h-5 text-amber-400" />
@@ -144,21 +159,19 @@ export const CaptureModal: React.FC<CaptureModalProps> = ({
           </button>
         </div>
 
-        {/* Processing Indicator */}
         {isProcessing && (
           <div className="relative rounded-2xl bg-black/60 border border-amber-400/60 p-6 flex flex-col items-center justify-center text-center overflow-hidden my-2">
             <div className="absolute inset-x-0 h-1 bg-gradient-to-r from-transparent via-amber-400 to-transparent radar-line" />
             <RefreshCw className="w-10 h-10 text-amber-400 animate-spin mb-3" />
             <span className="text-base font-bold text-amber-300">
-              Gemini Flash Analisando a Mesa...
+              Escaneando Mesa com IA...
             </span>
             <span className="text-xs text-emerald-300/80 mt-1">
-              Detectando cartas do Hero, board comunitário, stacks e ação prévia
+              Identificando cartas do Hero, board e stacks em tempo real
             </span>
           </div>
         )}
 
-        {/* Live Camera View if active */}
         {useLiveCamera && !isProcessing && (
           <div className="relative rounded-2xl overflow-hidden bg-black aspect-video sm:aspect-[4/3] flex items-center justify-center border border-amber-400/50">
             <video
@@ -168,7 +181,6 @@ export const CaptureModal: React.FC<CaptureModalProps> = ({
               muted
               className="w-full h-full object-cover"
             />
-            {/* Viewfinder guides */}
             <div className="absolute inset-6 border-2 border-dashed border-amber-400/50 rounded-xl pointer-events-none flex flex-col justify-between p-2">
               <span className="text-[10px] font-mono text-amber-300/80 uppercase">
                 Área de detecção da mesa
@@ -177,8 +189,6 @@ export const CaptureModal: React.FC<CaptureModalProps> = ({
                 Cartas do Hero & Board
               </span>
             </div>
-
-            {/* Shutter CTA */}
             <div className="absolute bottom-4 inset-x-0 flex justify-center gap-3">
               <button
                 type="button"
@@ -199,7 +209,6 @@ export const CaptureModal: React.FC<CaptureModalProps> = ({
           </div>
         )}
 
-        {/* Camera error notification if any */}
         {cameraError && (
           <div className="flex items-center gap-2 text-xs text-amber-300 bg-amber-950/40 border border-amber-600/40 rounded-xl p-3">
             <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
@@ -207,10 +216,8 @@ export const CaptureModal: React.FC<CaptureModalProps> = ({
           </div>
         )}
 
-        {/* Main Capture Options */}
         {!useLiveCamera && !isProcessing && (
           <div className="flex flex-col gap-3">
-            {/* Hidden file inputs */}
             <input
               type="file"
               ref={fileInputRef}
@@ -228,11 +235,9 @@ export const CaptureModal: React.FC<CaptureModalProps> = ({
             />
 
             <div className="grid grid-cols-2 gap-3">
-              {/* Camera direct snap button */}
               <button
                 type="button"
                 onClick={() => {
-                  // Try mobile camera input first for reliability
                   if (cameraInputRef.current) {
                     cameraInputRef.current.click();
                   } else {
@@ -248,7 +253,6 @@ export const CaptureModal: React.FC<CaptureModalProps> = ({
                 </span>
               </button>
 
-              {/* Upload photo from device */}
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
@@ -262,7 +266,6 @@ export const CaptureModal: React.FC<CaptureModalProps> = ({
               </button>
             </div>
 
-            {/* Live Camera Button */}
             <button
               type="button"
               onClick={startLiveCamera}
@@ -272,15 +275,10 @@ export const CaptureModal: React.FC<CaptureModalProps> = ({
               <span>Abrir Câmera em Tempo Real (Viewfinder)</span>
             </button>
 
-            {/* Quick Demo Scenarios (One tap) */}
             <div className="pt-2 border-t border-emerald-800/60">
-              <div className="flex items-center gap-1.5 mb-2.5">
-                <Sparkles className="w-4 h-4 text-amber-400" />
-                <span className="text-xs font-bold uppercase tracking-wider text-amber-300">
-                  Ou Teste com Cenários Prontos (1 Toque)
-                </span>
-              </div>
-
+              <span className="text-xs font-bold uppercase tracking-wider text-amber-300 block mb-2">
+                Ou Teste com Cenários Prontos (1 Toque)
+              </span>
               <div className="flex flex-col gap-2">
                 {SAMPLE_SCENARIOS.map((scenario) => (
                   <button
