@@ -13,7 +13,7 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '15mb' }));
 
 const apiKey = process.env.GEMINI_API_KEY;
 let aiClient: GoogleGenAI | null = null;
@@ -29,7 +29,7 @@ if (apiKey) {
   });
 }
 
-// Endpoint: Visão computacional rápida
+// Endpoint: Visão computacional rápida otimizada para fotos de tela de PC (Suprema/PPPoker/Online)
 app.post('/api/poker/analyze', async (req: Request, res: Response) => {
   try {
     const { imageBase64, mimeType = 'image/jpeg' } = req.body;
@@ -44,26 +44,31 @@ app.post('/api/poker/analyze', async (req: Request, res: Response) => {
 
     const cleanBase64 = imageBase64.replace(/^data:image\/\w+;base64,/, '');
 
-    const promptText = `Você é um scanner ultra-rápido de mesas de Texas Hold'em. Responda SOMENTE um JSON estrito:
+    const promptText = `Você é um scanner de visão ultra-rápido para mesas de Texas Hold'em (app mobile ou tela de PC/Suprema Poker).
+Analise a imagem da tela e retorne SOMENTE um JSON estrito no formato:
 {
-  "hero_hand": ["As", "Kd"],
-  "board": ["Qh", "Jd", "2s"],
+  "hero_hand": ["Jh", "4s"],
+  "board": ["3d", "8d", "7s"],
   "stage": "flop",
-  "position": "BTN",
-  "effective_stack_bb": 40,
-  "active_villains": 1,
+  "position": "BB",
+  "effective_stack_bb": 48,
+  "active_villains": 2,
   "action_to_hero": "unopened",
-  "confidence_summary": "Hero identificado com As Kd no BTN."
+  "confidence_summary": "Hero: Jh 4s no BB | Flop: 3d 8d 7s"
 }
-Regras críticas:
-- hero_hand: exatamente as 2 cartas do jogador em primeiro plano.
-- board: cartas comunitárias centrais (0 no preflop, 3 no flop, 4 no turn, 5 no river).
-- Formato de cartas: Rank (2-9, T, J, Q, K, A) + Naipe (s, h, d, c). Exemplos válidos: "Ah", "Td", "7c", "Ks".
-- stage: "preflop" | "flop" | "turn" | "river".
-- position: "UTG" | "MP" | "CO" | "BTN" | "SB" | "BB" | null.`;
+
+Regras de Mapeamento:
+1. hero_hand: As 2 cartas na parte inferior central da mesa, logo ao lado ou acima do avatar do jogador inferior. Ranks: 2-9, T, J, Q, K, A. Naipes: s (espadas), h (copas), d (ouros), c (paus). Se não ler com certeza, retorne [].
+2. board: Cartas comunitárias no centro do feltro verde (0 no preflop, 3 no flop, 4 no turn, 5 no river).
+3. stage: "preflop", "flop", "turn" ou "river".
+4. position: Identifique as tags redondas nos jogadores: "BB", "SB", ou "D" (Dealer/BTN). Se o jogador inferior tiver a tag BB, retorne "BB". Se não tiver tag explícita, estime: "UTG", "MP", "CO", "BTN", "SB", "BB" ou null.
+5. effective_stack_bb: Localize os blinds na mesa (ex: "Blinds 10/20" -> BB = 20) e o saldo do Hero (ex: 960). Divida o saldo pelo valor do Big Blind (ex: 960 / 20 = 48 BBs). Retorne o número inteiro de BBs. Se não encontrar, retorne null.
+6. active_villains: Número de oponentes que possuem cartas fechadas ativas na mão (ignore quem está EMPTY ou Sitting Out).
+7. action_to_hero: Ação observada: "unopened", "limp", "raise", "3bet" ou null.
+Retorne APENAS o JSON puro sem formatação markdown.`;
 
     const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Tempo limite excedido na análise (12s).')), 12000)
+      setTimeout(() => reject(new Error('Tempo limite de 12s excedido na análise do Gemini.')), 12000)
     );
 
     const apiPromise = aiClient.models.generateContent({
@@ -95,7 +100,6 @@ Regras críticas:
     const validStages = ['preflop', 'flop', 'turn', 'river'];
     const validActions = ['unopened', 'limp', 'raise', '3bet'];
 
-    // Conversão segura caso o modelo retorne strings numéricas
     const stackNum = Number(parsed.effective_stack_bb);
     const villainsNum = Number(parsed.active_villains);
 
@@ -133,14 +137,7 @@ app.post('/api/poker/strategic-advice', async (req: Request, res: Response) => {
     const { hero_hand, board, stage, position, effective_stack_bb, active_villains, action_to_hero } = req.body;
     if (!aiClient) return res.status(503).json({ error: 'Gemini não configurado.' });
 
-    const promptText = `Coach GTO Texas Hold'em. Responda SOMENTE JSON:
-{
-  "main_line": "RAISE",
-  "sizing_advice": "2.5x BB",
-  "gto_rationale": "Justificativa técnica densa de range.",
-  "exploits_and_traps": "Dica exploratória.",
-  "next_street_plan": "Plano pós-flop."
-}
+    const promptText = `Coach GTO Texas Hold'em. Responda SOMENTE JSON com: main_line, sizing_advice, gto_rationale, exploits_and_traps, next_street_plan.
 Spot: Hero: ${Array.isArray(hero_hand) ? hero_hand.join(' ') : '?'} | Board: ${Array.isArray(board) ? board.join(' ') : 'Preflop'} | Estágio: ${stage} | Posição: ${position || 'BTN'} | Stack: ${effective_stack_bb || 40}BB | Vilões: ${active_villains || 1} | Ação: ${action_to_hero || 'unopened'}.`;
 
     const response = await aiClient.models.generateContent({
