@@ -82,6 +82,10 @@ export default function App() {
   const handleImageCaptured = async (base64Image: string) => {
     setIsAnalyzingImage(true);
     setDeepAnalysisResult(null);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
+
     try {
       const response = await fetch('/api/poker/analyze', {
         method: 'POST',
@@ -90,16 +94,18 @@ export default function App() {
           imageBase64: base64Image,
           mimeType: 'image/jpeg',
         }),
+        signal: controller.signal,
       });
 
+      clearTimeout(timeoutId);
+
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Erro na análise da imagem.');
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || errorData.details || `Erro do servidor (${response.status})`);
       }
 
       const extraction: VisionExtraction = await response.json();
 
-      // Update state with Gemini extraction
       if (extraction.hero_hand && extraction.hero_hand.length > 0) {
         setHeroHand(extraction.hero_hand);
       }
@@ -109,21 +115,25 @@ export default function App() {
       if (extraction.stage) {
         setStage(extraction.stage);
       }
-      setPosition(extraction.position);
-      setStackBB(extraction.effective_stack_bb);
-      setVillains(extraction.active_villains);
-      setActionToHero(extraction.action_to_hero);
-
+      if (extraction.position) setPosition(extraction.position);
+      if (extraction.effective_stack_bb) setStackBB(extraction.effective_stack_bb);
+      if (extraction.active_villains) setVillains(extraction.active_villains);
+      if (extraction.action_to_hero) setActionToHero(extraction.action_to_hero);
       if (extraction.confidence) {
         setConfidence(extraction.confidence);
-        setConfidenceSummary(extraction.confidence.summary || 'Extração de visão computacional concluída.');
+        setConfidenceSummary(extraction.confidence.summary || 'Extração de visão concluída.');
       }
 
       setIsCaptureModalOpen(false);
     } catch (err: any) {
       console.error('Vision analysis error:', err);
-      alert(`Falha na extração de visão: ${err.message || 'Verifique sua conexão ou a imagem.'}`);
+      const msg = err.name === 'AbortError' 
+        ? 'A requisição demorou muito (tempo esgotado). Tente novamente.' 
+        : (err.message || 'Erro ao processar imagem.');
+      alert(`Falha na análise: ${msg}`);
+      setIsCaptureModalOpen(false);
     } finally {
+      clearTimeout(timeoutId);
       setIsAnalyzingImage(false);
     }
   };
