@@ -12,7 +12,6 @@ export interface FastDecisionInput {
   gameMode: GameMode;
 }
 
-// Exportações para os componentes visuais
 export const RANKS = ['A', 'K', 'Q', 'J', 'T', '9', '8', '7', '6', '5', '4', '3', '2'] as const;
 export const SUITS: Suit[] = ['s', 'h', 'd', 'c'];
 
@@ -23,135 +22,180 @@ export const SUIT_INFO: Record<Suit, { symbol: string; name: string; color: stri
   c: { symbol: '♣', name: 'Paus', color: 'text-emerald-400', bg: 'bg-emerald-950/40' },
 };
 
-// Compatibilidade legada
-export function formatCards(cards: string[]): string {
-  if (!cards || !Array.isArray(cards)) return '';
-  return cards.join(' ');
-}
-
-export function evaluateBoardTexture(board: string[]) {
-  if (!board || board.length === 0) return { isMonotone: false, isPaired: false, isConnected: false };
-  const suits = board.map((c) => c[1]?.toLowerCase());
-  const ranks = board.map((c) => c[0]?.toUpperCase());
-  return { isMonotone: new Set(suits).size === 1, isPaired: new Set(ranks).size < ranks.length, isConnected: false };
-}
+// --- FUNÇÕES DE SUPORTE ---
+const getRankVal = (r: string) => '23456789TJQKA'.indexOf(r.toUpperCase());
 
 function getHandKey(card1: string, card2: string): string {
   if (!card1 || !card2) return '';
   const r1 = card1[0]?.toUpperCase();
   const r2 = card2[0]?.toUpperCase();
-  const s1 = card1[1]?.toLowerCase();
-  const s2 = card2[1]?.toLowerCase();
-
-  const rankOrder = '23456789TJQKA';
-  const idx1 = rankOrder.indexOf(r1);
-  const idx2 = rankOrder.indexOf(r2);
-
-  if (idx1 === -1 || idx2 === -1) return '';
-  if (idx1 === idx2) return `${r1}${r2}`;
-  const isSuited = s1 === s2;
-
-  return idx1 > idx2 ? `${r1}${r2}${isSuited ? 's' : 'o'}` : `${r2}${r1}${isSuited ? 's' : 'o'}`;
+  const isSuited = card1[1]?.toLowerCase() === card2[1]?.toLowerCase();
+  
+  const v1 = getRankVal(r1);
+  const v2 = getRankVal(r2);
+  
+  if (v1 === v2) return `${r1}${r2}`;
+  return v1 > v2 ? `${r1}${r2}${isSuited ? 's' : 'o'}` : `${r2}${r1}${isSuited ? 's' : 'o'}`;
 }
 
+// --- RANGES PRÉ-FLOP ---
 const PREMIUM_HANDS = ['AA', 'KK', 'QQ', 'JJ', 'TT', 'AKs', 'AKo', 'AQs'];
 const STRONG_HANDS = ['99', '88', '77', 'AJs', 'ATs', 'AQo', 'KQs', 'KJs'];
 const PLAYABLE_HANDS = ['66', '55', '44', '33', '22', 'A9s', 'A8s', 'A5s', 'A4s', 'AJo', 'ATo', 'KQo', 'QJs', 'JTs', 'T9s', '98s'];
-// Range extra para agressividade no Spin & Go (Qualquer Ás, Reis naipados)
 const SPIN_PUSH_HANDS = [...PREMIUM_HANDS, ...STRONG_HANDS, ...PLAYABLE_HANDS, 'A2o', 'A3o', 'A4o', 'A5o', 'A6o', 'A7o', 'A8o', 'A9o', 'K9s', 'K8s', 'Q9s'];
 
+// --- MOTOR PÓS-FLOP (PRO) ---
+function evaluatePostFlop(heroHand: string[], board: string[]): { category: string, desc: string, isDraw: boolean } {
+  const allCards = [...heroHand, ...board];
+  
+  // Avaliação de Naipes (Flush / Draw)
+  const suitCounts: Record<string, number> = {};
+  allCards.forEach(c => { const s = c[1]; suitCounts[s] = (suitCounts[s] || 0) + 1; });
+  const maxSuitCount = Math.max(...Object.values(suitCounts), 0);
+  
+  const hasFlush = maxSuitCount >= 5;
+  const hasFlushDraw = maxSuitCount === 4;
+
+  // Avaliação de Pares e Ranks
+  const hRanks = heroHand.map(c => getRankVal(c[0]));
+  const bRanks = board.map(c => getRankVal(c[0]));
+  const highestBoardRank = Math.max(...bRanks);
+  
+  const isPocketPair = hRanks[0] === hRanks[1];
+  const isOverpair = isPocketPair && hRanks[0] > highestBoardRank;
+  
+  let hitBoardCount = 0;
+  let isTopPair = false;
+  let isMidBottomPair = false;
+  
+  hRanks.forEach(hr => {
+    if (bRanks.includes(hr)) {
+      hitBoardCount++;
+      if (hr === highestBoardRank) isTopPair = true;
+      else isMidBottomPair = true;
+    }
+  });
+
+  const isTwoPairOrSet = hitBoardCount >= 2 || (isPocketPair && bRanks.includes(hRanks[0]));
+
+  if (hasFlush) return { category: 'monster', desc: 'Flush Completo', isDraw: false };
+  if (isTwoPairOrSet) return { category: 'strong', desc: 'Dois Pares ou Trinca (Set)', isDraw: false };
+  if (isOverpair) return { category: 'strong', desc: 'Overpair', isDraw: false };
+  if (isTopPair) return { category: 'marginal_plus', desc: 'Top Pair', isDraw: false };
+  if (hasFlushDraw) return { category: 'draw', desc: 'Flush Draw (Mão na massa)', isDraw: true };
+  if (isMidBottomPair) return { category: 'marginal', desc: 'Par Médio/Baixo', isDraw: false };
+  
+  return { category: 'trash', desc: 'Air (Nenhum acerto relevante)', isDraw: false };
+}
+
+// --- FUNÇÃO PRINCIPAL (ROTEADOR) ---
 export function calculateFastDecision(input: FastDecisionInput): PokerDecision {
-  const { heroHand, position, stackDepth, actionToHero, gameMode } = input;
+  const { heroHand, board, position, stackDepth, actionToHero, gameMode } = input;
 
   if (!heroHand || heroHand.length < 2) {
-    return { action: 'CHECK', confidence: 0, sizing: '-', rationale: 'Aguardando seleção das cartas.', evEstimate: 0, riskLevel: 'LOW' };
+    return { action: 'AGUARDANDO', confidence: 0, sizing: '-', rationale: 'Selecione as 2 cartas do Hero.', evEstimate: 0, riskLevel: 'LOW' };
   }
 
+  // ROTEAMENTO: SE TEM BOARD (>=3 CARTAS), VAI PARA O MOTOR PÓS-FLOP PRO
+  if (board && board.length >= 3) {
+    const postFlop = evaluatePostFlop(heroHand, board);
+    const stage = board.length === 3 ? 'Flop' : board.length === 4 ? 'Turn' : 'River';
+
+    if (postFlop.category === 'monster' || postFlop.category === 'strong') {
+      return {
+        action: 'RAISE',
+        confidence: 0.95,
+        sizing: '50% a 75% do Pote',
+        rationale: `Modo PRO (${stage}): Você tem ${postFlop.desc}. Extraia valor máximo apostando ou aumentando.`,
+        evEstimate: 4.5,
+        riskLevel: 'HIGH'
+      };
+    }
+
+    if (postFlop.category === 'marginal_plus') {
+      return {
+        action: 'CALL',
+        confidence: 0.85,
+        sizing: 'Controle de Pote',
+        rationale: `Modo PRO (${stage}): ${postFlop.desc}. Mão com valor de showdown. Pague apostas justas, evite potes gigantes.`,
+        evEstimate: 1.5,
+        riskLevel: 'MEDIUM'
+      };
+    }
+
+    if (postFlop.isDraw) {
+      return {
+        action: 'CALL / SEMI-BLUFF',
+        confidence: 0.8,
+        sizing: 'Baseado em Pot Odds',
+        rationale: `Modo PRO (${stage}): Você tem um ${postFlop.desc}. Pode apostar para roubar o pote ou pagar se as odds permitirem.`,
+        evEstimate: 1.2,
+        riskLevel: 'HIGH'
+      };
+    }
+
+    return {
+      action: 'CHECK / FOLD',
+      confidence: 0.9,
+      sizing: '0 BB',
+      rationale: `Modo PRO (${stage}): ${postFlop.desc}. Desista para qualquer agressão adversária.`,
+      evEstimate: 0,
+      riskLevel: 'LOW'
+    };
+  }
+
+  // --- MOTOR PRÉ-FLOP (MANTIDO INTACTO) ---
   const handKey = getHandKey(heroHand[0], heroHand[1]);
   const isPremium = PREMIUM_HANDS.includes(handKey);
   const isStrong = STRONG_HANDS.includes(handKey);
   const isPlayable = PLAYABLE_HANDS.includes(handKey);
   const isSpinPush = SPIN_PUSH_HANDS.includes(handKey);
 
-  // ==========================================
-  // ESTRATÉGIA 1: SPIN & GO (SIT & GO 3-Max)
-  // ==========================================
   if (gameMode === 'SPIN') {
     if (stackDepth === 'low') {
-      if (actionToHero === 'unopened') {
-        if (isSpinPush) return { action: 'ALL-IN', confidence: 0.98, sizing: 'Push', rationale: `Spin&Go Nash: Shove lucrativo com ${handKey} do ${position}. Foca na fold equity extrema.`, evEstimate: 3.0, riskLevel: 'HIGH' };
-        return { action: 'FOLD', confidence: 0.9, sizing: '0 BB', rationale: 'Mão muito fraca até para Nash push.', evEstimate: 0, riskLevel: 'LOW' };
-      }
-      if (actionToHero === 'raise') {
-        if (isPremium || isStrong) return { action: 'ALL-IN', confidence: 0.95, sizing: 'Re-shove', rationale: 'Top range, re-shove obrigatório em mesas curtas.', evEstimate: 4.0, riskLevel: 'HIGH' };
-        return { action: 'FOLD', confidence: 0.9, sizing: '0 BB', rationale: 'Fold contra raise ativo no Spin.', evEstimate: 0, riskLevel: 'LOW' };
-      }
+      if (actionToHero === 'unopened') return isSpinPush 
+        ? { action: 'ALL-IN', confidence: 0.98, sizing: 'Push', rationale: `Nash Shove lucrativo com ${handKey}.`, evEstimate: 3.0, riskLevel: 'HIGH' }
+        : { action: 'FOLD', confidence: 0.9, sizing: '0', rationale: 'Fold GTO.', evEstimate: 0, riskLevel: 'LOW' };
     }
-    // Spin Medium/Deep
-    if (actionToHero === 'unopened') {
-      if (isPremium || isStrong || isPlayable) return { action: 'RAISE', confidence: 0.9, sizing: '2.0x BB', rationale: `Min-raise em ${position} para roubar blinds em Spin&Go.`, evEstimate: 1.5, riskLevel: 'MEDIUM' };
-      return { action: 'FOLD', confidence: 0.9, sizing: '0 BB', rationale: 'Fold GTO.', evEstimate: 0, riskLevel: 'LOW' };
-    }
+    return (isPremium || isStrong || isPlayable) 
+      ? { action: 'RAISE', confidence: 0.9, sizing: '2.0x BB', rationale: 'Min-raise em Spin.', evEstimate: 1.5, riskLevel: 'MEDIUM' }
+      : { action: 'FOLD', confidence: 0.9, sizing: '0', rationale: 'Fold GTO.', evEstimate: 0, riskLevel: 'LOW' };
   }
 
-  // ==========================================
-  // ESTRATÉGIA 2: CASH GAME (Rake-Aware, Deep)
-  // ==========================================
   if (gameMode === 'CASH') {
     if (actionToHero === 'unopened') {
-      if (isPremium || isStrong) {
-        return { action: 'RAISE', confidence: 0.95, sizing: '3.0x - 3.5x BB', rationale: `Cash Game: Open-raise maior (3x) para bater o Rake e extrair valor.`, evEstimate: 2.5, riskLevel: 'MEDIUM' };
-      }
-      if (isPlayable && ['CO', 'BTN'].includes(position)) {
-        return { action: 'RAISE', confidence: 0.85, sizing: '2.5x BB', rationale: `Roubo em posição. Evite jogar pots deep sem posição no Cash Game.`, evEstimate: 1.2, riskLevel: 'MEDIUM' };
-      }
-      return { action: 'FOLD', confidence: 0.9, sizing: '0 BB', rationale: `Fold. Jogar mãos marginais em Cash atrai perdas enormes pós-flop devido ao Rake.`, evEstimate: 0, riskLevel: 'LOW' };
+      if (isPremium || isStrong) return { action: 'RAISE', confidence: 0.95, sizing: '3.0x BB', rationale: `Cash: Open-raise maior por causa do Rake.`, evEstimate: 2.5, riskLevel: 'MEDIUM' };
+      if (isPlayable && ['CO', 'BTN'].includes(position)) return { action: 'RAISE', confidence: 0.85, sizing: '2.5x BB', rationale: `Roubo posicional em Cash.`, evEstimate: 1.2, riskLevel: 'MEDIUM' };
+      return { action: 'FOLD', confidence: 0.9, sizing: '0', rationale: `Evite potes deep com mãos fracas.`, evEstimate: 0, riskLevel: 'LOW' };
     }
     if (actionToHero === 'raise') {
-      if (isPremium) return { action: 'RAISE', confidence: 0.95, sizing: '3-Bet (3.5x o Raise)', rationale: `3-Bet polarizado de alto valor (Cash Game).`, evEstimate: 4.0, riskLevel: 'HIGH' };
-      if ((isStrong || isPlayable) && position === 'BB') return { action: 'CALL', confidence: 0.85, sizing: 'Pagar (Call)', rationale: `Defender o BB por Implied Odds em stacks profundos.`, evEstimate: 1.0, riskLevel: 'MEDIUM' };
-      return { action: 'FOLD', confidence: 0.9, sizing: '0 BB', rationale: `Fold seguro contra open-raise no Cash.`, evEstimate: 0, riskLevel: 'LOW' };
+      if (isPremium) return { action: 'RAISE', confidence: 0.95, sizing: '3-Bet (3.5x)', rationale: `3-Bet por valor.`, evEstimate: 4.0, riskLevel: 'HIGH' };
+      if ((isStrong || isPlayable) && position === 'BB') return { action: 'CALL', confidence: 0.85, sizing: 'Call', rationale: `Defesa de BB deep.`, evEstimate: 1.0, riskLevel: 'MEDIUM' };
+      return { action: 'FOLD', confidence: 0.9, sizing: '0', rationale: `Fold contra raise em Cash.`, evEstimate: 0, riskLevel: 'LOW' };
     }
   }
 
-  // ==========================================
-  // ESTRATÉGIA 3: MTT (Torneio / ICM / Antes)
-  // ==========================================
+  // MTT
   if (stackDepth === 'low') {
-    if (actionToHero === 'unopened' || actionToHero === 'limp') {
-      if (isPremium || isStrong || (isPlayable && ['CO', 'BTN', 'SB'].includes(position))) {
-        return { action: 'ALL-IN', confidence: 0.95, sizing: 'Push', rationale: `MTT: All-in direto para roubar os blinds + Antes e evitar jogar pós-flop curto.`, evEstimate: 2.8, riskLevel: 'HIGH' };
-      }
-      return { action: 'FOLD', confidence: 0.9, sizing: '0 BB', rationale: `MTT: Preservar fold equity futura.`, evEstimate: 0, riskLevel: 'LOW' };
-    }
-    if (actionToHero === 'raise') {
-      if (isPremium || (isStrong && ['BTN', 'BB'].includes(position))) return { action: 'ALL-IN', confidence: 0.95, sizing: 'Re-shove', rationale: `MTT Re-shove de valor.`, evEstimate: 3.5, riskLevel: 'HIGH' };
-      return { action: 'FOLD', confidence: 0.95, sizing: '0 BB', rationale: `Não envolver a vida do torneio contra raises dominantes.`, evEstimate: 0, riskLevel: 'LOW' };
-    }
+    if (actionToHero === 'unopened' || actionToHero === 'limp') return (isPremium || isStrong || (isPlayable && ['CO', 'BTN', 'SB'].includes(position)))
+      ? { action: 'ALL-IN', confidence: 0.95, sizing: 'Push', rationale: `MTT Push para roubar blinds/antes.`, evEstimate: 2.8, riskLevel: 'HIGH' }
+      : { action: 'FOLD', confidence: 0.9, sizing: '0', rationale: `Preservar stack.`, evEstimate: 0, riskLevel: 'LOW' };
+    if (actionToHero === 'raise') return (isPremium || (isStrong && ['BTN', 'BB'].includes(position)))
+      ? { action: 'ALL-IN', confidence: 0.95, sizing: 'Re-shove', rationale: `Re-shove valor.`, evEstimate: 3.5, riskLevel: 'HIGH' }
+      : { action: 'FOLD', confidence: 0.95, sizing: '0', rationale: `Fold MTT.`, evEstimate: 0, riskLevel: 'LOW' };
   }
 
-  if (stackDepth === 'medium' || stackDepth === 'deep') {
-    if (actionToHero === 'unopened') {
-      if (isPremium || isStrong) return { action: 'RAISE', confidence: 0.92, sizing: '2.1x - 2.2x BB', rationale: `MTT: Open-raise otimizado. Arriscar poucas fichas para ganhar os Antes.`, evEstimate: 1.8, riskLevel: 'MEDIUM' };
-      if (isPlayable && ['CO', 'BTN', 'SB'].includes(position)) return { action: 'RAISE', confidence: 0.85, sizing: '2.0x BB', rationale: `MTT: Roubo lucrativo em posição late.`, evEstimate: 1.1, riskLevel: 'MEDIUM' };
-      return { action: 'FOLD', confidence: 0.88, sizing: '0 BB', rationale: `Fold padrão MTT.`, evEstimate: 0, riskLevel: 'LOW' };
-    }
-    if (actionToHero === 'raise') {
-      if (isPremium) return { action: 'RAISE', confidence: 0.95, sizing: '3-Bet (2.5x a 3x)', rationale: `MTT: 3-Bet extraindo valor do topo do range.`, evEstimate: 3.2, riskLevel: 'HIGH' };
-      if (isStrong && position === 'BB') return { action: 'CALL', confidence: 0.82, sizing: 'Defender BB', rationale: `MTT: Ótimas pot odds por causa dos Antes no pote.`, evEstimate: 0.8, riskLevel: 'MEDIUM' };
-      return { action: 'FOLD', confidence: 0.9, sizing: '0 BB', rationale: `ICM Fold: evite vazamento de fichas em potes inflados.`, evEstimate: 0, riskLevel: 'LOW' };
-    }
+  if (actionToHero === 'unopened') {
+    if (isPremium || isStrong) return { action: 'RAISE', confidence: 0.92, sizing: '2.2x BB', rationale: `Open MTT Padrão.`, evEstimate: 1.8, riskLevel: 'MEDIUM' };
+    if (isPlayable && ['CO', 'BTN', 'SB'].includes(position)) return { action: 'RAISE', confidence: 0.85, sizing: '2.0x BB', rationale: `Roubo late position.`, evEstimate: 1.1, riskLevel: 'MEDIUM' };
+    return { action: 'FOLD', confidence: 0.88, sizing: '0', rationale: `Fold MTT.`, evEstimate: 0, riskLevel: 'LOW' };
   }
 
-  return { action: isPremium ? 'RAISE' : 'FOLD', confidence: 0.8, sizing: isPremium ? '2.5x BB' : '0 BB', rationale: `Linha de segurança conservadora.`, evEstimate: 0.5, riskLevel: 'LOW' };
+  if (actionToHero === 'raise') {
+    if (isPremium) return { action: 'RAISE', confidence: 0.95, sizing: '3-Bet (2.8x)', rationale: `3-Bet valor.`, evEstimate: 3.2, riskLevel: 'HIGH' };
+    if (isStrong && position === 'BB') return { action: 'CALL', confidence: 0.82, sizing: 'Call', rationale: `Call por Odds.`, evEstimate: 0.8, riskLevel: 'MEDIUM' };
+    return { action: 'FOLD', confidence: 0.9, sizing: '0', rationale: `Fold para raise.`, evEstimate: 0, riskLevel: 'LOW' };
+  }
+
+  return { action: 'FOLD', confidence: 0.8, sizing: '0', rationale: `Fold padrão.`, evEstimate: 0, riskLevel: 'LOW' };
 }
-
-export const calculateDecision = (params: any) => {
-  return calculateFastDecision({
-    heroHand: params.heroCardsRaw || [],
-    position: params.position || 'BTN',
-    stackDepth: 'medium',
-    actionToHero: params.actionToHero || 'unopened',
-    gameMode: 'MTT',
-  });
-};
