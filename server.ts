@@ -18,10 +18,8 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 app.use(express.json({ limit: '15mb' }));
 
 // --- 1. CONFIGURAÇÕES ---
-// CHAVE DO MERCADO PAGO DE PRODUÇÃO
 const client = new MercadoPagoConfig({ accessToken: 'APP_USR-930320636272567-111012-ee53ca4a31a8da40aa76d650225c4cb4-280571635' });
 
-// CHAVES DO FIREBASE NO SERVIDOR
 const firebaseConfig = {
   apiKey: "AIzaSyAQSdhDE1j2A2VdLW9i2LvicpO_lUFKEbs",
   authDomain: "poker-vision-ai.firebaseapp.com",
@@ -35,20 +33,35 @@ const firebaseApp = initializeApp(firebaseConfig);
 const db = getFirestore(firebaseApp);
 
 
-// --- 2. ROTAS DE PAGAMENTO ---
-// Gerar Checkout (Modo Produção Real)
+// --- 2. ROTAS DE PAGAMENTO (MULTI-PLANOS) ---
 app.post('/api/checkout', async (req: Request, res: Response) => {
   try {
+    const { planType } = req.body; // 'mensal' | 'semestral' | 'anual'
     const host = req.get('host');
     const protocol = req.headers['x-forwarded-proto'] || req.protocol;
     const baseUrl = `${protocol}://${host}`;
     
+    let title = 'Poker Vision AI - Acesso PRO (Mensal)';
+    let price = 29.90;
+    let daysToAdd = 30;
+
+    if (planType === 'semestral') {
+      title = 'Poker Vision AI - Acesso PRO (Semestral)';
+      price = 149.90;
+      daysToAdd = 180;
+    } else if (planType === 'anual') {
+      title = 'Poker Vision AI - Acesso PRO (Anual)';
+      price = 249.90;
+      daysToAdd = 365;
+    }
+
     const preference = new Preference(client);
     const result = await preference.create({
       body: {
-        items: [{ id: 'plano_pro', title: 'Poker Vision AI - Acesso PRO', quantity: 1, unit_price: 1.90, currency_id: 'BRL' }],
+        items: [{ id: planType || 'mensal', title, quantity: 1, unit_price: price, currency_id: 'BRL' }],
         back_urls: { success: `${baseUrl}?status=success`, failure: `${baseUrl}?status=failure`, pending: `${baseUrl}?status=pending` },
-        auto_return: 'approved'
+        auto_return: 'approved',
+        metadata: { daysToAdd } // Guarda os dias para o webhook resgatar
       }
     });
 
@@ -60,7 +73,7 @@ app.post('/api/checkout', async (req: Request, res: Response) => {
   }
 });
 
-// OUVINTE (WEBHOOK) - Desbloqueia o Firebase automaticamente
+// OUVINTE (WEBHOOK) - Ativa e calcula os dias PRO no Firebase
 app.post('/api/webhook', async (req: Request, res: Response) => {
   try {
     const action = req.body.action || req.query.topic || req.body.type;
@@ -72,9 +85,24 @@ app.post('/api/webhook', async (req: Request, res: Response) => {
 
       if (paymentData.status === 'approved') {
         const email = paymentData.payer?.email;
+        
+        // Tenta descobrir quantos dias adicionar com base no valor pago ou metadados
+        let daysToAdd = 30;
+        const transactionAmount = paymentData.transaction_amount;
+        if (transactionAmount && transactionAmount >= 200) daysToAdd = 365; // Anual
+        else if (transactionAmount && transactionAmount >= 120) daysToAdd = 180; // Semestral
+
         if (email) {
-          await setDoc(doc(db, 'users', email), { isPro: true }, { merge: true });
-          console.log(`SUCESSO: Conta PRO ativada automaticamente para: ${email}`);
+          // Calcula a data de expiração somando os dias à data atual
+          const expirationDate = new Date();
+          expirationDate.setDate(expirationDate.getDate() + daysToAdd);
+
+          await setDoc(doc(db, 'users', email), { 
+            isPro: true, 
+            expiresAt: expirationDate.toISOString() 
+          }, { merge: true });
+
+          console.log(`SUCESSO: Conta PRO ativada por ${daysToAdd} dias para: ${email}`);
         }
       }
     }
