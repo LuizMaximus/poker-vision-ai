@@ -5,6 +5,7 @@ interface Props {
   isOpen: boolean;
   onClose: () => void;
   selectedCards: string[];
+  usedCards?: string[]; // --- NOVO: Cartas já usadas na outra secção (mão ou board) ---
   onSelectCard: (card: string) => void;
   maxCards: number;
   title: string;
@@ -13,7 +14,15 @@ interface Props {
 const SUITS = ['s', 'h', 'd', 'c'];
 const RANKS = ['A', 'K', 'Q', 'J', 'T', '9', '8', '7', '6', '5', '4', '3', '2'];
 
-export const CardPickerModal: React.FC<Props> = ({ isOpen, onClose, selectedCards, onSelectCard, maxCards, title }) => {
+export const CardPickerModal: React.FC<Props> = ({ 
+  isOpen, 
+  onClose, 
+  selectedCards, 
+  usedCards = [], 
+  onSelectCard, 
+  maxCards, 
+  title 
+}) => {
   if (!isOpen) return null;
 
   return (
@@ -35,23 +44,27 @@ export const CardPickerModal: React.FC<Props> = ({ isOpen, onClose, selectedCard
               {RANKS.map(rank => {
                 const card = `${rank}${suit}`;
                 const isSelected = selectedCards.includes(card);
+                const isUsed = usedCards.includes(card); // --- NOVO: Verifica se está em uso ---
                 const isRed = suit === 'h' || suit === 'd';
                 const suitSymbol = suit === 's' ? '♠' : suit === 'h' ? '♥' : suit === 'd' ? '♦' : '♣';
                 
                 return (
                   <button
                     key={card}
+                    disabled={isUsed} // --- NOVO: Impede o clique se já estiver em uso ---
                     onClick={() => onSelectCard(card)}
-                    className={`relative h-16 rounded-xl flex flex-col items-center justify-center border transition-all duration-200 active:scale-95 ${
-                      isSelected 
-                        ? 'bg-amber-400 border-amber-300 text-slate-950 shadow-[0_0_15px_rgba(251,191,36,0.4)] scale-105 z-10' 
-                        : 'bg-white border-slate-300 hover:border-amber-400 hover:shadow-md'
+                    className={`relative h-16 rounded-xl flex flex-col items-center justify-center border transition-all duration-200 ${
+                      isUsed 
+                        ? 'bg-slate-900/40 border-slate-800 opacity-30 cursor-not-allowed' // Estilo de carta indisponível
+                        : isSelected 
+                          ? 'bg-amber-400 border-amber-300 text-slate-950 shadow-[0_0_15px_rgba(251,191,36,0.4)] scale-105 z-10 active:scale-95' 
+                          : 'bg-white border-slate-300 hover:border-amber-400 hover:shadow-md active:scale-95'
                     }`}
                   >
-                    <span className={`text-lg font-black leading-none ${isSelected ? 'text-slate-950' : isRed ? 'text-red-600' : 'text-slate-900'}`}>
+                    <span className={`text-lg font-black leading-none ${isUsed ? 'text-slate-600' : isSelected ? 'text-slate-950' : isRed ? 'text-red-600' : 'text-slate-900'}`}>
                       {rank}
                     </span>
-                    <span className={`text-xl leading-none mt-1 ${isSelected ? 'text-slate-950' : isRed ? 'text-red-600' : 'text-slate-900'}`}>
+                    <span className={`text-xl leading-none mt-1 ${isUsed ? 'text-slate-600' : isSelected ? 'text-slate-950' : isRed ? 'text-red-600' : 'text-slate-900'}`}>
                       {suitSymbol}
                     </span>
                   </button>
