@@ -301,7 +301,32 @@ export const App: React.FC = () => {
         </div>
       )}
 
-      <CardPickerModal isOpen={pickerTarget !== null} onClose={() => setPickerTarget(null)} selectedCards={pickerTarget === 'hero' ? heroHand : boardCards} onSelectCard={(c) => { if (pickerTarget === 'hero') { if (heroHand.includes(c)) setHeroHand(heroHand.filter(x => x !== c)); else { const u = [...heroHand, c]; setHeroHand(u); if (u.length === 2) setTimeout(() => setPickerTarget(null), 150); } } else { if (boardCards.includes(c)) setBoardCards(boardCards.filter(x => x !== c)); else { const u = [...boardCards, c]; if (u.length <= 5) setBoardCards(u); } } }} maxCards={pickerTarget === 'hero' ? 2 : 5} title={pickerTarget === 'hero' ? "Cartas da Mão" : "Cartas da Mesa"} />
+      <CardPickerModal 
+        isOpen={pickerTarget !== null} 
+        onClose={() => setPickerTarget(null)} 
+        selectedCards={pickerTarget === 'hero' ? heroHand : boardCards} 
+        usedCards={pickerTarget === 'hero' ? boardCards : heroHand}
+        onSelectCard={(c) => { 
+          if (pickerTarget === 'hero') { 
+            if (heroHand.includes(c)) {
+              setHeroHand(heroHand.filter(x => x !== c)); 
+            } else { 
+              const u = [...heroHand, c]; 
+              setHeroHand(u); 
+              if (u.length === 2) setTimeout(() => setPickerTarget(null), 150); 
+            } 
+          } else { 
+            if (boardCards.includes(c)) {
+              setBoardCards(boardCards.filter(x => x !== c)); 
+            } else { 
+              const u = [...boardCards, c]; 
+              if (u.length <= 5) setBoardCards(u); 
+            } 
+          } 
+        }} 
+        maxCards={pickerTarget === 'hero' ? 2 : 5} 
+        title={pickerTarget === 'hero' ? "Cartas da Mão" : "Cartas da Mesa"} 
+      />
     </div>
   );
 };
