@@ -13,11 +13,11 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 10000;
 
 app.use(express.json({ limit: '15mb' }));
 
-// --- 1. CONFIGURAÇÕES ---
+// --- CONFIGURAÇÕES ---
 const client = new MercadoPagoConfig({ accessToken: 'APP_USR-930320636272567-111012-ee53ca4a31a8da40aa76d650225c4cb4-280571635' });
 
 const firebaseConfig = {
@@ -32,11 +32,10 @@ const firebaseConfig = {
 const firebaseApp = initializeApp(firebaseConfig);
 const db = getFirestore(firebaseApp);
 
-
-// --- 2. ROTAS DE PAGAMENTO (MULTI-PLANOS) ---
+// --- ROTAS DE PAGAMENTO (MULTI-PLANOS) ---
 app.post('/api/checkout', async (req: Request, res: Response) => {
   try {
-    const { planType } = req.body; // 'mensal' | 'semestral' | 'anual'
+    const { planType } = req.body;
     const host = req.get('host');
     const protocol = req.headers['x-forwarded-proto'] || req.protocol;
     const baseUrl = `${protocol}://${host}`;
@@ -61,7 +60,7 @@ app.post('/api/checkout', async (req: Request, res: Response) => {
         items: [{ id: planType || 'mensal', title, quantity: 1, unit_price: price, currency_id: 'BRL' }],
         back_urls: { success: `${baseUrl}?status=success`, failure: `${baseUrl}?status=failure`, pending: `${baseUrl}?status=pending` },
         auto_return: 'approved',
-        metadata: { daysToAdd } // Guarda os dias para o webhook resgatar
+        metadata: { daysToAdd }
       }
     });
 
@@ -73,7 +72,7 @@ app.post('/api/checkout', async (req: Request, res: Response) => {
   }
 });
 
-// OUVINTE (WEBHOOK) - Ativa e calcula os dias PRO no Firebase
+// WEBHOOK
 app.post('/api/webhook', async (req: Request, res: Response) => {
   try {
     const action = req.body.action || req.query.topic || req.body.type;
@@ -85,15 +84,12 @@ app.post('/api/webhook', async (req: Request, res: Response) => {
 
       if (paymentData.status === 'approved') {
         const email = paymentData.payer?.email;
-        
-        // Tenta descobrir quantos dias adicionar com base no valor pago ou metadados
         let daysToAdd = 30;
         const transactionAmount = paymentData.transaction_amount;
-        if (transactionAmount && transactionAmount >= 200) daysToAdd = 365; // Anual
-        else if (transactionAmount && transactionAmount >= 120) daysToAdd = 180; // Semestral
+        if (transactionAmount && transactionAmount >= 200) daysToAdd = 365;
+        else if (transactionAmount && transactionAmount >= 120) daysToAdd = 180;
 
         if (email) {
-          // Calcula a data de expiração somando os dias à data atual
           const expirationDate = new Date();
           expirationDate.setDate(expirationDate.getDate() + daysToAdd);
 
@@ -101,8 +97,6 @@ app.post('/api/webhook', async (req: Request, res: Response) => {
             isPro: true, 
             expiresAt: expirationDate.toISOString() 
           }, { merge: true });
-
-          console.log(`SUCESSO: Conta PRO ativada por ${daysToAdd} dias para: ${email}`);
         }
       }
     }
@@ -113,8 +107,7 @@ app.post('/api/webhook', async (req: Request, res: Response) => {
   }
 });
 
-
-// --- 3. LÓGICA GTO MANTIDA ---
+// --- LÓGICA GTO ---
 const getRankVal = (r: string) => '23456789TJQKA'.indexOf(r.toUpperCase());
 function getHandKey(card1: string, card2: string): string {
   if (!card1 || !card2) return '';
@@ -217,9 +210,11 @@ async function setupServer() {
     const vite = await createViteServer({ server: { middlewareMode: true }, appType: 'spa' });
     app.use(vite.middlewares);
   } else {
+    // Serve os ficheiros compilados do React corretamente
     app.use(express.static(path.resolve(__dirname, 'dist')));
     app.get('*', (_req, res) => res.sendFile(path.resolve(__dirname, 'dist', 'index.html')));
   }
+  
   app.listen(PORT, '0.0.0.0', () => console.log(`Poker Backend Seguro na PORTA ${PORT}`));
 }
 setupServer();
