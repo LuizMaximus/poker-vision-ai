@@ -18,7 +18,7 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 app.use(express.json({ limit: '15mb' }));
 
 // --- 1. CONFIGURAÇÕES ---
-// CHAVE DO MERCADO PAGO ATUALIZADA (PRODUÇÃO)
+// CHAVE DO MERCADO PAGO DE PRODUÇÃO
 const client = new MercadoPagoConfig({ accessToken: 'APP_USR-930320636272567-111012-ee53ca4a31a8da40aa76d650225c4cb4-280571635' });
 
 // CHAVES DO FIREBASE NO SERVIDOR
@@ -52,7 +52,6 @@ app.post('/api/checkout', async (req: Request, res: Response) => {
       }
     });
 
-    // Utiliza o link oficial de produção (init_point) para cobranças reais
     const initUrl = result.init_point || result.sandbox_init_point;
     res.json({ init_point: initUrl });
   } catch (error: any) {
@@ -64,17 +63,16 @@ app.post('/api/checkout', async (req: Request, res: Response) => {
 // OUVINTE (WEBHOOK) - Desbloqueia o Firebase automaticamente
 app.post('/api/webhook', async (req: Request, res: Response) => {
   try {
-    const action = req.body.action || req.query.topic;
-    
-    if (action === 'payment.created' || action === 'payment') {
-      const paymentId = req.body.data?.id || req.query.id;
+    const action = req.body.action || req.query.topic || req.body.type;
+    const paymentId = req.body.data?.id || req.query.id;
+
+    if ((action === 'payment' || action?.includes('payment')) && paymentId) {
       const paymentClient = new Payment(client);
       const paymentData = await paymentClient.get({ id: paymentId as string });
 
       if (paymentData.status === 'approved') {
         const email = paymentData.payer?.email;
         if (email) {
-          // Salva no banco de dados: isPro = true
           await setDoc(doc(db, 'users', email), { isPro: true }, { merge: true });
           console.log(`SUCESSO: Conta PRO ativada automaticamente para: ${email}`);
         }
