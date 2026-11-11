@@ -3,7 +3,7 @@ import { TablePosition, PokerDecision } from './utils/pokerTypes';
 import { fetchFastDecision, StackDepth, GameMode } from './utils/pokerEngine';
 import { CardPickerModal } from './components/CardPickerModal';
 import { DecisionDisplay } from './components/DecisionDisplay';
-import { Zap, RotateCcw, Swords, Coins, Trophy, Lock, Crown, LogOut, Mail, KeyRound, Loader2, AlertCircle } from 'lucide-react';
+import { Zap, RotateCcw, Swords, Coins, Trophy, Lock, Crown, LogOut, Mail, KeyRound, Loader2, AlertCircle, Clock } from 'lucide-react';
 
 import { auth, db, googleProvider } from './firebase'; 
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithPopup, onAuthStateChanged, signOut, User } from 'firebase/auth'; 
@@ -18,6 +18,8 @@ export const App: React.FC = () => {
   const [authError, setAuthError] = useState('');
 
   const [isProUser, setIsProUser] = useState(false);
+  const [daysRemaining, setDaysRemaining] = useState<number | null>(null);
+  const [selectedPlan, setSelectedPlan] = useState<'mensal' | 'semestral' | 'anual'>('mensal');
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [isCheckoutLoading, setIsCheckoutLoading] = useState(false);
   const [checkoutError, setCheckoutError] = useState('');
@@ -32,18 +34,18 @@ export const App: React.FC = () => {
   const [decision, setDecision] = useState<PokerDecision | null>(null);
   const [isCalculating, setIsCalculating] = useState(false);
 
-  // --- DETETAR O RETORNO DO PAGAMENTO NA URL ---
+  // --- DETETAR RETORNO DO PAGAMENTO ---
   useEffect(() => {
     const queryParams = new URLSearchParams(window.location.search);
     const status = queryParams.get('status');
 
     if (status === 'success') {
-      // Limpa a URL para remover o ?status=success sem recarregar a página
       window.history.replaceState({}, document.title, window.location.pathname);
       setIsProUser(true);
     }
   }, []);
 
+  // --- VERIFICAR STATUS E VALIDADE DO PRO NO FIREBASE ---
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
@@ -51,10 +53,33 @@ export const App: React.FC = () => {
         try {
           const userRef = doc(db, 'users', currentUser.email);
           const userSnap = await getDoc(userRef);
-          if (userSnap.exists() && userSnap.data().isPro === true) setIsProUser(true);
-          else setIsProUser(false);
+          if (userSnap.exists()) {
+            const data = userSnap.data();
+            if (data.isPro && data.expiresAt) {
+              const expirationDate = new Date(data.expiresAt);
+              const now = new Date();
+              const diffTime = expirationDate.getTime() - now.getTime();
+              const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+              if (diffDays > 0) {
+                setIsProUser(true);
+                setDaysRemaining(diffDays);
+              } else {
+                setIsProUser(false);
+                setDaysRemaining(null);
+              }
+            } else if (data.isPro) {
+              setIsProUser(true); // Caso seja PRO vitalício/manual
+            } else {
+              setIsProUser(false);
+            }
+          } else {
+            setIsProUser(false);
+          }
         } catch (error) { setIsProUser(false); }
-      } else setIsProUser(false);
+      } else {
+        setIsProUser(false);
+      }
       setIsAuthLoading(false);
     });
     return unsubscribe;
@@ -89,7 +114,7 @@ export const App: React.FC = () => {
       const res = await fetch('/api/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: user?.email })
+        body: JSON.stringify({ email: user?.email, planType: selectedPlan })
       });
       const data = await res.json();
       if (data.init_point) {
@@ -195,7 +220,14 @@ export const App: React.FC = () => {
               <h1 className="text-base font-black text-transparent bg-clip-text bg-gradient-to-r from-amber-200 to-amber-500 font-serif leading-none flex items-center gap-1.5">
                 POKER VISION {isProUser ? <Crown className="w-4 h-4 text-amber-400 drop-shadow-[0_0_5px_rgba(251,191,36,0.8)]" /> : <span className="px-1.5 py-0.5 bg-slate-800 border border-slate-700 text-[9px] rounded text-slate-400 font-bold">FREE</span>}
               </h1>
-              <span className="text-[10px] text-emerald-400/70 font-medium truncate max-w-[140px] block mt-0.5">{user.email}</span>
+              <div className="flex items-center gap-2 mt-0.5">
+                <span className="text-[10px] text-emerald-400/70 font-medium truncate max-w-[130px] block">{user.email}</span>
+                {isProUser && daysRemaining !== null && (
+                  <span className="text-[9px] bg-amber-500/20 text-amber-400 px-1.5 py-0.2 rounded border border-amber-500/30 font-bold flex items-center gap-1">
+                    <Clock className="w-2.5 h-2.5" /> {daysRemaining}d restantes
+                  </span>
+                )}
+              </div>
             </div>
           </div>
           <div className="flex gap-2">
@@ -281,15 +313,34 @@ export const App: React.FC = () => {
 
       {showUpgradeModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm transition-all duration-300">
-          <div className="bg-[#0a1f15] border border-amber-500/30 w-full max-w-sm rounded-[2rem] p-8 shadow-[0_0_40px_rgba(5,20,14,0.9)] text-center relative overflow-hidden transform animate-in fade-in zoom-in-95 duration-200">
+          <div className="bg-[#0a1f15] border border-amber-500/30 w-full max-w-sm rounded-[2rem] p-6 shadow-[0_0_40px_rgba(5,20,14,0.9)] text-center relative overflow-hidden transform animate-in fade-in zoom-in-95 duration-200">
             <div className="absolute top-[-50px] left-1/2 transform -translate-x-1/2 w-32 h-32 bg-amber-500/20 rounded-full blur-[40px]"></div>
-            <Crown className="w-14 h-14 text-amber-400 mx-auto mb-5 drop-shadow-[0_0_10px_rgba(251,191,36,0.6)] relative z-10" />
-            <h2 className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white to-slate-300 mb-3 relative z-10">Desbloqueie o Motor PRO</h2>
-            <p className="text-slate-400 text-sm mb-8 leading-relaxed relative z-10">
-              Analise Board Textures (Flop, Turn, River) e receba as decisões matemáticas mais precisas do mercado para esmagar os seus oponentes no Pós-Flop.
+            <Crown className="w-12 h-12 text-amber-400 mx-auto mb-3 drop-shadow-[0_0_10px_rgba(251,191,36,0.6)] relative z-10" />
+            <h2 className="text-xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white to-slate-300 mb-2 relative z-10">Desbloqueie o Motor PRO</h2>
+            <p className="text-slate-400 text-xs mb-5 leading-relaxed relative z-10">
+              Escolha o seu plano ideal e domine o Pós-Flop com análises matemáticas avançadas.
             </p>
+
+            {/* SELETOR DE PLANOS */}
+            <div className="grid grid-cols-3 gap-2 mb-5 relative z-10">
+              {[
+                { id: 'mensal', name: 'Mensal', price: 'R$ 29,90' },
+                { id: 'semestral', name: 'Semestral', price: 'R$ 149,90' },
+                { id: 'anual', name: 'Anual', price: 'R$ 249,90', badge: '-30%' }
+              ].map(p => (
+                <button
+                  key={p.id}
+                  onClick={() => setSelectedPlan(p.id as any)}
+                  className={`p-2.5 rounded-xl border flex flex-col items-center justify-center transition-all relative ${selectedPlan === p.id ? 'bg-amber-400/20 border-amber-400 text-white shadow-[0_0_15px_rgba(245,158,11,0.2)]' : 'bg-[#05140e] border-emerald-800/60 text-slate-400 hover:border-emerald-600'}`}
+                >
+                  {p.badge && <span className="absolute -top-2 bg-amber-500 text-slate-950 text-[8px] font-black px-1.5 py-0.2 rounded-full">{p.badge}</span>}
+                  <span className="text-[11px] font-bold">{p.name}</span>
+                  <span className="text-xs font-black text-amber-400 mt-0.5">{p.price}</span>
+                </button>
+              ))}
+            </div>
             
-            <div className="flex flex-col gap-4 relative z-10">
+            <div className="flex flex-col gap-3 relative z-10">
               {checkoutError && (
                 <div className="bg-red-950/40 text-red-400 text-xs py-2 px-3 rounded-lg border border-red-900/50 flex items-center justify-center gap-1.5">
                   <AlertCircle className="w-4 h-4" /> {checkoutError}
@@ -299,11 +350,11 @@ export const App: React.FC = () => {
               <button 
                 onClick={handlePayment} 
                 disabled={isCheckoutLoading}
-                className="w-full py-4 bg-gradient-to-r from-amber-500 to-amber-400 text-slate-950 font-black rounded-2xl shadow-[0_0_20px_rgba(245,158,11,0.3)] hover:shadow-[0_0_30px_rgba(245,158,11,0.5)] hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-2 text-base"
+                className="w-full py-3.5 bg-gradient-to-r from-amber-500 to-amber-400 text-slate-950 font-black rounded-xl shadow-[0_0_20px_rgba(245,158,11,0.3)] hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-2 text-sm uppercase tracking-wider"
               >
-                {isCheckoutLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Assinar PRO (R$ 29,90)'}
+                {isCheckoutLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : `Assinar Plano ${selectedPlan}`}
               </button>
-              <button onClick={() => setShowUpgradeModal(false)} className="text-sm font-bold text-slate-500 hover:text-white py-2 transition-colors">
+              <button onClick={() => setShowUpgradeModal(false)} className="text-xs font-bold text-slate-500 hover:text-white py-1 transition-colors">
                 Continuar na versão Limitada
               </button>
             </div>
