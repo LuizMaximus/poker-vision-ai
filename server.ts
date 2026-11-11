@@ -18,7 +18,7 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 app.use(express.json({ limit: '15mb' }));
 
 // --- 1. CONFIGURAÇÕES ---
-// CHAVE DO MERCADO PAGO ATUALIZADA:
+// CHAVE DO MERCADO PAGO ATUALIZADA (PRODUÇÃO)
 const client = new MercadoPagoConfig({ accessToken: 'APP_USR-930320636272567-111012-ee53ca4a31a8da40aa76d650225c4cb4-280571635' });
 
 // CHAVES DO FIREBASE NO SERVIDOR
@@ -36,7 +36,7 @@ const db = getFirestore(firebaseApp);
 
 
 // --- 2. ROTAS DE PAGAMENTO ---
-// Gerar Checkout
+// Gerar Checkout (Modo Produção Real)
 app.post('/api/checkout', async (req: Request, res: Response) => {
   try {
     const host = req.get('host');
@@ -52,8 +52,8 @@ app.post('/api/checkout', async (req: Request, res: Response) => {
       }
     });
 
-    // Força o link de Sandbox (Teste) para garantir que funciona sem erros de restrição de conta
-    const initUrl = result.sandbox_init_point || result.init_point;
+    // Utiliza o link oficial de produção (init_point) para cobranças reais
+    const initUrl = result.init_point || result.sandbox_init_point;
     res.json({ init_point: initUrl });
   } catch (error: any) {
     console.error("Erro no Mercado Pago:", error);
