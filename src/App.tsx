@@ -5,8 +5,8 @@ import { CardPickerModal } from './components/CardPickerModal';
 import { DecisionDisplay } from './components/DecisionDisplay';
 import { Zap, RotateCcw, Swords, Coins, Trophy, Lock, Crown, LogOut, Mail, KeyRound, Loader2, AlertCircle } from 'lucide-react';
 
-import { auth, db, googleProvider } from './firebase'; // Importamos o googleProvider
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithPopup, onAuthStateChanged, signOut, User } from 'firebase/auth'; // Importamos o signInWithPopup
+import { auth, db, googleProvider } from './firebase'; 
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithPopup, onAuthStateChanged, signOut, User } from 'firebase/auth'; 
 import { doc, getDoc } from 'firebase/firestore';
 
 export const App: React.FC = () => {
@@ -31,6 +31,18 @@ export const App: React.FC = () => {
   const [pickerTarget, setPickerTarget] = useState<'hero' | 'board' | null>(null);
   const [decision, setDecision] = useState<PokerDecision | null>(null);
   const [isCalculating, setIsCalculating] = useState(false);
+
+  // --- DETETAR O RETORNO DO PAGAMENTO NA URL ---
+  useEffect(() => {
+    const queryParams = new URLSearchParams(window.location.search);
+    const status = queryParams.get('status');
+
+    if (status === 'success') {
+      // Limpa a URL para remover o ?status=success sem recarregar a página
+      window.history.replaceState({}, document.title, window.location.pathname);
+      setIsProUser(true);
+    }
+  }, []);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -59,7 +71,6 @@ export const App: React.FC = () => {
     }
   };
 
-  // --- NOVO: FUNÇÃO DE LOGIN COM O GOOGLE ---
   const handleGoogleAuth = async () => {
     setAuthError('');
     try {
@@ -142,7 +153,6 @@ export const App: React.FC = () => {
             </button>
           </form>
 
-          {/* --- NOVO: BOTÃO DO GOOGLE --- */}
           <div className="relative flex items-center py-5">
             <div className="flex-grow border-t border-emerald-800/60"></div>
             <span className="flex-shrink-0 mx-4 text-emerald-600/80 text-xs font-bold uppercase tracking-wider">Ou</span>
