@@ -3,8 +3,7 @@ import { TablePosition, PokerDecision } from './utils/pokerTypes';
 import { fetchFastDecision, StackDepth, GameMode } from './utils/pokerEngine';
 import { CardPickerModal } from './components/CardPickerModal';
 import { DecisionDisplay } from './components/DecisionDisplay';
-import { Zap, RotateCcw, Swords, Coins, Trophy, Lock, Crown, LogOut, Mail, KeyRound, Loader2, AlertCircle, Clock, ShieldCheck, Sparkles, CheckCircle2, MessageSquare, Menu, X, FileText, ChevronDown } from 'lucide-react';
-
+import { Zap, RotateCcw, Swords, Coins, Trophy, Lock, Crown, LogOut, Mail, KeyRound, Loader2, AlertCircle, Clock, ShieldCheck, Sparkles, CheckCircle2, MessageSquare, Menu, X, FileText, ChevronDown, ArrowRight } from 'lucide-react';
 import { auth, db, googleProvider } from './firebase'; 
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithPopup, onAuthStateChanged, signOut, User } from 'firebase/auth'; 
 import { doc, getDoc } from 'firebase/firestore';
