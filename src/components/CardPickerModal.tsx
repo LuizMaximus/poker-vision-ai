@@ -5,7 +5,7 @@ interface Props {
   isOpen: boolean;
   onClose: () => void;
   selectedCards: string[];
-  usedCards?: string[]; // --- NOVO: Cartas já usadas na outra secção (mão ou board) ---
+  usedCards?: string[]; // <--- Adicionado aqui
   onSelectCard: (card: string) => void;
   maxCards: number;
   title: string;
@@ -44,18 +44,18 @@ export const CardPickerModal: React.FC<Props> = ({
               {RANKS.map(rank => {
                 const card = `${rank}${suit}`;
                 const isSelected = selectedCards.includes(card);
-                const isUsed = usedCards.includes(card); // --- NOVO: Verifica se está em uso ---
+                const isUsed = usedCards.includes(card); // <--- Verifica se está na outra seleção
                 const isRed = suit === 'h' || suit === 'd';
                 const suitSymbol = suit === 's' ? '♠' : suit === 'h' ? '♥' : suit === 'd' ? '♦' : '♣';
                 
                 return (
                   <button
                     key={card}
-                    disabled={isUsed} // --- NOVO: Impede o clique se já estiver em uso ---
+                    disabled={isUsed} // <--- Bloqueia o clique se já estiver em uso
                     onClick={() => onSelectCard(card)}
                     className={`relative h-16 rounded-xl flex flex-col items-center justify-center border transition-all duration-200 ${
                       isUsed 
-                        ? 'bg-slate-900/40 border-slate-800 opacity-30 cursor-not-allowed' // Estilo de carta indisponível
+                        ? 'bg-slate-900/40 border-slate-800 opacity-30 cursor-not-allowed' // Visual de carta indisponível
                         : isSelected 
                           ? 'bg-amber-400 border-amber-300 text-slate-950 shadow-[0_0_15px_rgba(251,191,36,0.4)] scale-105 z-10 active:scale-95' 
                           : 'bg-white border-slate-300 hover:border-amber-400 hover:shadow-md active:scale-95'
