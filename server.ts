@@ -35,7 +35,8 @@ const db = getFirestore(firebaseApp);
 // --- ROTAS DE PAGAMENTO (MULTI-PLANOS) ---
 app.post('/api/checkout', async (req: Request, res: Response) => {
   try {
-    const { planType } = req.body;
+    // Agora recebemos o e-mail do utilizador logado no site
+    const { planType, email } = req.body; 
     const host = req.get('host');
     const protocol = req.headers['x-forwarded-proto'] || req.protocol;
     const baseUrl = `${protocol}://${host}`;
@@ -60,7 +61,8 @@ app.post('/api/checkout', async (req: Request, res: Response) => {
         items: [{ id: planType || 'mensal', title, quantity: 1, unit_price: price, currency_id: 'BRL' }],
         back_urls: { success: `${baseUrl}?status=success`, failure: `${baseUrl}?status=failure`, pending: `${baseUrl}?status=pending` },
         auto_return: 'approved',
-        metadata: { daysToAdd }
+        // Enviamos o e-mail do App como metadado oculto para o MP devolver no webhook
+        metadata: { daysToAdd, user_email: email } 
       }
     });
 
@@ -83,20 +85,25 @@ app.post('/api/webhook', async (req: Request, res: Response) => {
       const paymentData = await paymentClient.get({ id: paymentId as string });
 
       if (paymentData.status === 'approved') {
-        const email = paymentData.payer?.email;
+        // Resgata o e-mail exato do App (ou o do MP como backup)
+        const targetEmail = paymentData.metadata?.user_email || paymentData.payer?.email;
+        
         let daysToAdd = 30;
         const transactionAmount = paymentData.transaction_amount;
         if (transactionAmount && transactionAmount >= 200) daysToAdd = 365;
         else if (transactionAmount && transactionAmount >= 120) daysToAdd = 180;
 
-        if (email) {
+        if (targetEmail) {
           const expirationDate = new Date();
           expirationDate.setDate(expirationDate.getDate() + daysToAdd);
 
-          await setDoc(doc(db, 'users', email), { 
+          // Salva no Firestore ativando a conta PRO
+          await setDoc(doc(db, 'users', targetEmail), { 
             isPro: true, 
             expiresAt: expirationDate.toISOString() 
           }, { merge: true });
+          
+          console.log(`Sucesso: Utilizador ${targetEmail} promovido a PRO por ${daysToAdd} dias.`);
         }
       }
     }
@@ -210,7 +217,7 @@ async function setupServer() {
     const vite = await createViteServer({ server: { middlewareMode: true }, appType: 'spa' });
     app.use(vite.middlewares);
   } else {
-    // Serve os ficheiros compilados do React corretamente
+    // Serve os ficheiros compilados do React corretamente no Render
     app.use(express.static(path.resolve(__dirname, 'dist')));
     app.get('*', (_req, res) => res.sendFile(path.resolve(__dirname, 'dist', 'index.html')));
   }
