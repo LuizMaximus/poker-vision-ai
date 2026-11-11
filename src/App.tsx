@@ -3,7 +3,7 @@ import { TablePosition, PokerDecision } from './utils/pokerTypes';
 import { fetchFastDecision, StackDepth, GameMode } from './utils/pokerEngine';
 import { CardPickerModal } from './components/CardPickerModal';
 import { DecisionDisplay } from './components/DecisionDisplay';
-import { Zap, RotateCcw, Swords, Coins, Trophy, Lock, Crown, LogOut, Mail, KeyRound, Loader2, AlertCircle, Clock, ShieldCheck, Sparkles, CheckCircle2, HelpCircle, ArrowRight, MessageSquare, Menu, X, FileText, ChevronDown } from 'lucide-react';
+import { Zap, RotateCcw, Swords, Coins, Trophy, Lock, Crown, LogOut, Mail, KeyRound, Loader2, AlertCircle, Clock, ShieldCheck, Sparkles, CheckCircle2, MessageSquare, Menu, X, FileText, ChevronDown } from 'lucide-react';
 
 import { auth, db, googleProvider } from './firebase'; 
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithPopup, onAuthStateChanged, signOut, User } from 'firebase/auth'; 
@@ -39,6 +39,9 @@ export const App: React.FC = () => {
   const [pickerTarget, setPickerTarget] = useState<'hero' | 'board' | null>(null);
   const [decision, setDecision] = useState<PokerDecision | null>(null);
   const [isCalculating, setIsCalculating] = useState(false);
+
+  // Link do WhatsApp com mensagem automática
+  const whatsappUrl = "https://wa.me/5511944870124?text=Ol%C3%A1%2C%20vim%20pelo%20Poker%20Vision%20AI%20e%20quero%20tirar%20uma%20d%C3%BAvida.";
 
   // --- DETETAR RETORNO DO PAGAMENTO ---
   useEffect(() => {
@@ -226,7 +229,6 @@ export const App: React.FC = () => {
     // --- LANDING PAGE DE ALTA CONVERSÃO ---
     return (
       <div className="min-h-screen bg-[#020806] text-slate-100 font-sans selection:bg-amber-400 selection:text-slate-950 relative overflow-x-hidden">
-        {/* Background glow effects */}
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[400px] bg-emerald-600/10 blur-[140px] pointer-events-none rounded-full"></div>
         <div className="absolute top-[40%] right-[-10%] w-[500px] h-[500px] bg-amber-500/5 blur-[160px] pointer-events-none rounded-full"></div>
 
@@ -316,7 +318,6 @@ export const App: React.FC = () => {
             </a>
           </div>
 
-          {/* Mockup visual estilizado do app */}
           <div className="relative max-w-4xl mx-auto rounded-3xl p-3 bg-gradient-to-b from-emerald-800/30 to-black/60 border border-emerald-700/40 shadow-[0_0_50px_rgba(5,150,105,0.2)]">
             <div className="bg-[#05140e] rounded-2xl p-6 sm:p-10 border border-emerald-900/60 flex flex-col items-center">
               <div className="flex items-center gap-2 mb-6 bg-amber-500/10 border border-amber-500/30 px-3 py-1 rounded-lg text-amber-400 text-xs font-bold">
@@ -538,7 +539,9 @@ export const App: React.FC = () => {
             <div className="flex items-center gap-6">
               <button onClick={() => setActiveModal('terms')} className="hover:text-amber-400 transition-colors">Termos de Uso</button>
               <button onClick={() => setActiveModal('privacy')} className="hover:text-amber-400 transition-colors">Política de Privacidade</button>
-              <a href="mailto:suporte@pokervision.com.br" className="hover:text-amber-400 transition-colors flex items-center gap-1"><MessageSquare className="w-3.5 h-3.5" /> Suporte</a>
+              <a href={whatsappUrl} target="_blank" rel="noopener noreferrer" className="hover:text-emerald-400 transition-colors flex items-center gap-1 font-bold text-emerald-400">
+                <MessageSquare className="w-3.5 h-3.5" /> Suporte WhatsApp
+              </a>
             </div>
             <div>
               © 2026 Poker Vision AI. Todos os direitos reservados.
