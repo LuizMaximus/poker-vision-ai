@@ -46,7 +46,7 @@ app.post('/api/checkout', async (req: Request, res: Response) => {
     const preference = new Preference(client);
     const result = await preference.create({
       body: {
-        items: [{ id: 'plano_pro', title: 'Poker Vision AI - Acesso PRO', quantity: 1, unit_price: 29.90, currency_id: 'BRL' }],
+        items: [{ id: 'plano_pro', title: 'Poker Vision AI - Acesso PRO', quantity: 1, unit_price: 1.90, currency_id: 'BRL' }],
         back_urls: { success: `${baseUrl}?status=success`, failure: `${baseUrl}?status=failure`, pending: `${baseUrl}?status=pending` },
         auto_return: 'approved'
       }
