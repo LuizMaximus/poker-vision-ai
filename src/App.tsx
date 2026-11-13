@@ -1,825 +1,416 @@
 import React, { useState, useEffect } from 'react';
-import { TablePosition, PokerDecision } from './utils/pokerTypes';
-import { fetchFastDecision, StackDepth, GameMode } from './utils/pokerEngine';
+import { 
+  Position, 
+  Stage, 
+  ActionToHero, 
+  PokerDecision, 
+  SampleScenario 
+} from './utils/pokerTypes';
+import { calculateDecision, SAMPLE_SCENARIOS } from './utils/pokerEngine';
+import { CaptureModal } from './components/CaptureModal';
 import { CardPickerModal } from './components/CardPickerModal';
+import { RangeMatrixModal } from './components/RangeMatrixModal';
+import { QuickChipsPanel } from './components/QuickChipsPanel';
+import { TableCardsView } from './components/TableCardsView';
 import { DecisionDisplay } from './components/DecisionDisplay';
-import { Zap, RotateCcw, Swords, Coins, Trophy, Lock, Crown, LogOut, Mail, KeyRound, Loader2, AlertCircle, Clock, ShieldCheck, Sparkles, CheckCircle2, MessageSquare, Menu, X, FileText, ChevronDown, ArrowRight } from 'lucide-react';
-import { auth, db, googleProvider } from './firebase'; 
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithPopup, onAuthStateChanged, signOut, User } from 'firebase/auth'; 
-import { doc, getDoc } from 'firebase/firestore';
+import { 
+  Camera, 
+  Zap, 
+  ShieldCheck, 
+  ArrowRight, 
+  User, 
+  LogOut, 
+  Lock, 
+  Grid, 
+  Sparkles,
+  CheckCircle2
+} from 'lucide-react';
 
-export const App: React.FC = () => {
-  const [user, setUser] = useState<User | null>(null);
-  const [isAuthLoading, setIsAuthLoading] = useState(true);
-  const [showLoginScreen, setShowLoginScreen] = useState(false);
-  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [authError, setAuthError] = useState('');
+export default function App() {
+  // --- ESTADOS DA APLICAÇÃO ---
+  // Se for falso, exibe a Landing Page otimizada com conversão imediata. Se verdadeiro, exibe o app logado/funcional.
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
+  const [showAuthModal, setShowAuthModal] = useState<boolean>(false);
 
-  const [isProUser, setIsProUser] = useState(false);
-  const [daysRemaining, setDaysRemaining] = useState<number | null>(null);
-  const [selectedPlan, setSelectedPlan] = useState<'mensal' | 'semestral' | 'anual'>('mensal');
-  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
-  const [isCheckoutLoading, setIsCheckoutLoading] = useState(false);
-  const [checkoutError, setCheckoutError] = useState('');
+  // Estados principais da mão de Poker
+  const [heroHand, setHeroHand] = useState<string[]>(['As', 'Ah']);
+  const [board, setBoard] = useState<string[]>([]);
+  const [stage, setStage] = useState<Stage>('preflop');
+  const [position, setPosition] = useState<Position | null>('BTN');
+  const [stackBB, setStackBB] = useState<number | null>(100);
+  const [villains, setVillains] = useState<number | null>(1);
+  const [actionToHero, setActionToHero] = useState<ActionToHero>('unopened');
 
-  // Estados da Landing Page
-  const [activeFaq, setActiveFaq] = useState<number | null>(null);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [activeModal, setActiveModal] = useState<'terms' | 'privacy' | null>(null);
+  // Estados de Modais
+  const [isCaptureOpen, setIsCaptureOpen] = useState<boolean>(false);
+  const [isProcessingVision, setIsProcessingVision] = useState<boolean>(false);
+  const [cardPickerConfig, setCardPickerConfig] = useState<{
+    isOpen: boolean;
+    title: string;
+    maxCards: number;
+    target: 'hero1' | 'hero2' | 'board' | null;
+    boardIndex?: number;
+  }>({
+    isOpen: false,
+    title: '',
+    maxCards: 2,
+    target: null,
+  });
+  const [isRangeMatrixOpen, setIsRangeMatrixOpen] = useState<boolean>(false);
 
-  const [gameMode, setGameMode] = useState<GameMode>('MTT');
-  const [heroHand, setHeroHand] = useState<string[]>([]);
-  const [boardCards, setBoardCards] = useState<string[]>([]);
-  const [position, setPosition] = useState<TablePosition>('BTN');
-  const [stackDepth, setStackDepth] = useState<StackDepth>('medium');
-  const [actionToHero, setActionToHero] = useState<'unopened' | 'limp' | 'raise' | '3bet'>('unopened');
-  const [pickerTarget, setPickerTarget] = useState<'hero' | 'board' | null>(null);
+  // Decisão GTO Calculada
   const [decision, setDecision] = useState<PokerDecision | null>(null);
-  const [isCalculating, setIsCalculating] = useState(false);
 
-  // Link do WhatsApp com mensagem automática
-  const whatsappUrl = "https://wa.me/5511944870124?text=Ol%C3%A1%2C%20vim%20pelo%20Poker%20Vision%20AI%20e%20quero%20tirar%20uma%20d%C3%BAvida.";
-
-  // --- DETETAR RETORNO DO PAGAMENTO ---
+  // Recalcula a decisão sempre que os parâmetros mudarem
   useEffect(() => {
-    const queryParams = new URLSearchParams(window.location.search);
-    const status = queryParams.get('status');
-
-    if (status === 'success') {
-      window.history.replaceState({}, document.title, window.location.pathname);
-      setIsProUser(true);
-    }
-  }, []);
-
-  // --- VERIFICAR STATUS E VALIDADE DO PRO NO FIREBASE ---
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      setUser(currentUser);
-      if (currentUser && currentUser.email) {
-        try {
-          const userRef = doc(db, 'users', currentUser.email);
-          const userSnap = await getDoc(userRef);
-          if (userSnap.exists()) {
-            const data = userSnap.data();
-            if (data.isPro && data.expiresAt) {
-              const expirationDate = new Date(data.expiresAt);
-              const now = new Date();
-              const diffTime = expirationDate.getTime() - now.getTime();
-              const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-              if (diffDays > 0) {
-                setIsProUser(true);
-                setDaysRemaining(diffDays);
-              } else {
-                setIsProUser(false);
-                setDaysRemaining(null);
-              }
-            } else if (data.isPro) {
-              setIsProUser(true); 
-            } else {
-              setIsProUser(false);
-            }
-          } else {
-            setIsProUser(false);
-          }
-        } catch (error) { setIsProUser(false); }
-      } else {
-        setIsProUser(false);
-      }
-      setIsAuthLoading(false);
-    });
-    return unsubscribe;
-  }, []);
-
-  const handleAuth = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setAuthError('');
-    try {
-      if (authMode === 'login') await signInWithEmailAndPassword(auth, email, password);
-      else await createUserWithEmailAndPassword(auth, email, password);
-    } catch (err: any) {
-      setAuthError(err.message.includes('auth/invalid-credential') ? 'Dados incorretos. Tente novamente.' : 'Erro ao autenticar.');
-    }
-  };
-
-  const handleGoogleAuth = async () => {
-    setAuthError('');
-    try {
-      await signInWithPopup(auth, googleProvider);
-    } catch (err: any) {
-      if (err.code !== 'auth/popup-closed-by-user') {
-        setAuthError('Erro ao iniciar sessão com o Google.');
-      }
-    }
-  };
-
-  const handlePayment = async (plan: 'mensal' | 'semestral' | 'anual' = selectedPlan) => {
-    if (!user) {
-      setShowUpgradeModal(false);
-      setShowLoginScreen(true);
-      return;
-    }
-    setIsCheckoutLoading(true);
-    setCheckoutError('');
-    try {
-      const res = await fetch('/api/checkout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: user?.email, planType: plan })
+    if (heroHand.length === 2) {
+      const res = calculateDecision({
+        heroCardsRaw: heroHand,
+        boardCardsRaw: board,
+        stage,
+        position: position || 'BTN',
+        effectiveStackBB: stackBB || 40,
+        activeVillains: villains || 1,
+        actionToHero: actionToHero || 'unopened',
       });
-      const data = await res.json();
-      if (data.init_point) {
-        window.location.href = data.init_point;
-      } else {
-        setCheckoutError(data.error || "Ocorreu um erro ao conectar com o banco. Tente novamente.");
-      }
-    } catch (error) {
-      setCheckoutError("Falha na comunicação. Verifique a sua internet.");
+      setDecision(res);
+    } else {
+      setDecision({
+        primaryAction: 'AGUARDANDO',
+        actionFrequencies: { fold: 0, checkCall: 0, raise: 0, allIn: 0 },
+        handStrengthPercent: 0,
+        handCategory: 'Aguardando cartas...',
+        tacticalJustification: 'Selecione as 2 cartas do Hero para iniciar a análise GTO.',
+        recommendedBetSize: '-',
+        equityVsRange: 0,
+        rangeAdvantage: 'neutral',
+      });
     }
-    setIsCheckoutLoading(false);
+  }, [heroHand, board, stage, position, stackBB, villains, actionToHero]);
+
+  // Handler para cenários prontos
+  const handleScenarioSelected = (scenario: SampleScenario) => {
+    setHeroHand(scenario.extraction.hero_hand);
+    setBoard(scenario.extraction.board);
+    setStage(scenario.extraction.stage);
+    if (scenario.extraction.position) setPosition(scenario.extraction.position);
+    if (scenario.extraction.effective_stack_bb) setStackBB(scenario.extraction.effective_stack_bb);
+    if (scenario.extraction.active_villains) setVillains(scenario.extraction.active_villains);
+    if (scenario.extraction.action_to_hero) setActionToHero(scenario.extraction.action_to_hero);
   };
 
-  useEffect(() => {
-    if (!user) return;
-    let isMounted = true;
-    const getDecision = async () => {
-      if (heroHand.length < 2) { setDecision({ action: 'AGUARDANDO', confidence: 0, sizing: '-', rationale: 'Selecione as suas 2 cartas para começar.', evEstimate: 0, riskLevel: 'LOW' }); return; }
-      setIsCalculating(true);
-      const result = await fetchFastDecision({ heroHand, board: boardCards, position, stackDepth, actionToHero, gameMode });
-      if (isMounted) { setDecision(result); setIsCalculating(false); }
-    };
-    getDecision();
-    return () => { isMounted = false; };
-  }, [heroHand, boardCards, position, stackDepth, actionToHero, gameMode, user]);
+  // Handler para captura de imagem (Vision AI Mock/API)
+  const handleImageCaptured = async (_base64: string) => {
+    setIsProcessingVision(true);
+    setTimeout(() => {
+      // Simula o retorno da IA de visão computacional com base no cenário monstro BTN
+      handleScenarioSelected(SAMPLE_SCENARIOS[0]);
+      setIsProcessingVision(false);
+      setIsCaptureOpen(false);
+    }, 1500);
+  };
 
-  const resetTable = () => { setHeroHand([]); setBoardCards([]); setActionToHero('unopened'); };
-  const handlePositionChange = (pos: TablePosition) => { setPosition(pos); if (pos === 'BB' && actionToHero === 'unopened') setActionToHero('limp'); };
-  const handleActionChange = (act: 'unopened' | 'limp' | 'raise' | '3bet') => { setActionToHero(act); if (act === 'unopened' && position === 'BB') setPosition('SB'); };
-  const handleModeChange = (mode: GameMode) => { setGameMode(mode); setHeroHand([]); setBoardCards([]); if (mode === 'SPIN') { setPosition('BTN'); setStackDepth('low'); } else if (mode === 'CASH') { setPosition('BTN'); setStackDepth('deep'); } else { setPosition('BTN'); setStackDepth('medium'); } };
-  const activePositions: TablePosition[] = gameMode === 'SPIN' ? ['BTN', 'SB', 'BB'] : ['UTG', 'MP', 'CO', 'BTN', 'SB', 'BB'];
+  // --- RENDERIZAÇÃO DA LANDING PAGE OTIMIZADA (Para resolver o problema de zero cadastros) ---
+  if (!isAuthenticated && !showAuthModal) {
+    const sampleSc = SAMPLE_SCENARIOS[0];
+    const initialLpDecision = calculateDecision({
+      heroCardsRaw: sampleSc.extraction.hero_hand,
+      boardCardsRaw: sampleSc.extraction.board,
+      stage: sampleSc.extraction.stage,
+      position: sampleSc.extraction.position || 'BTN',
+      effectiveStackBB: sampleSc.extraction.effective_stack_bb || 100,
+      activeVillains: sampleSc.extraction.active_villains || 1,
+      actionToHero: sampleSc.extraction.action_to_hero || 'unopened',
+    });
 
-  if (isAuthLoading) return <div className="min-h-screen bg-slate-950 flex items-center justify-center"><Zap className="w-10 h-10 text-amber-400 animate-pulse drop-shadow-[0_0_15px_rgba(251,191,36,0.6)]" /></div>;
-
-  // --- SE O UTILIZADOR NÃO ESTIVER LOGADO: EXIBE A LANDING PAGE OU TELA DE LOGIN ---
-  if (!user) {
-    if (showLoginScreen) {
-      return (
-        <div className="min-h-screen bg-[#020806] flex flex-col items-center justify-center p-4 select-none relative overflow-hidden">
-          <div className="absolute top-[-10%] left-[-10%] w-96 h-96 bg-emerald-900/20 rounded-full blur-[100px] pointer-events-none"></div>
-          <div className="absolute bottom-[-10%] right-[-10%] w-96 h-96 bg-amber-900/10 rounded-full blur-[100px] pointer-events-none"></div>
-          
-          <div className="w-full max-w-md bg-[#0c2419]/90 backdrop-blur-xl border border-emerald-800/50 rounded-3xl p-8 shadow-2xl z-10">
-            <div className="flex justify-between items-center mb-6">
-              <button onClick={() => setShowLoginScreen(false)} className="text-xs text-emerald-400 hover:text-white font-bold flex items-center gap-1">← Voltar à Apresentação</button>
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400/20 to-amber-600/10 border border-amber-400/50 flex items-center justify-center"><Zap className="w-5 h-5 text-amber-400" /></div>
+    return (
+      <div className="min-h-screen bg-[#06130d] text-slate-100 font-sans selection:bg-amber-400 selection:text-slate-950">
+        {/* Navbar */}
+        <header className="flex items-center justify-between px-6 py-4 border-b border-emerald-900/40 bg-[#081a12]/90 backdrop-blur sticky top-0 z-50">
+          <div className="flex items-center gap-2">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-300 to-amber-600 flex items-center justify-center font-black text-slate-950 shadow-lg shadow-amber-500/20">
+              PV
             </div>
-            
-            <h1 className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-amber-200 to-amber-500 text-center font-serif mb-1 tracking-tight">POKER VISION AI</h1>
-            <p className="text-xs text-emerald-400/80 text-center mb-6 font-medium">O seu assistente GTO de bolso</p>
-            
-            {authError && <div className="mb-4 bg-red-950/50 border border-red-900/50 text-red-400 text-xs font-bold text-center py-2 rounded-lg flex items-center justify-center gap-1.5"><AlertCircle className="w-3.5 h-3.5" />{authError}</div>}
-            
-            <form onSubmit={handleAuth} className="flex flex-col gap-4">
-              <div className="relative group">
-                <Mail className="w-5 h-5 text-emerald-600 absolute left-3 top-3.5 transition-colors group-focus-within:text-amber-400" />
-                <input type="email" placeholder="E-mail" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full bg-[#05140e] border border-emerald-800/60 rounded-xl py-3 pl-10 pr-4 text-white focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400/50 transition-all shadow-inner text-sm" required />
-              </div>
-              <div className="relative group">
-                <KeyRound className="w-5 h-5 text-emerald-600 absolute left-3 top-3.5 transition-colors group-focus-within:text-amber-400" />
-                <input type="password" placeholder="Palavra-passe (mín. 6 char)" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full bg-[#05140e] border border-emerald-800/60 rounded-xl py-3 pl-10 pr-4 text-white focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400/50 transition-all shadow-inner text-sm" required minLength={6} />
-              </div>
-              <button type="submit" className="w-full py-3.5 mt-2 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-700 text-white font-black uppercase tracking-widest text-xs shadow-[0_4px_14px_0_rgba(5,150,105,0.39)] hover:bg-gradient-to-r hover:from-emerald-500 hover:to-emerald-600 active:scale-[0.97] transition-all duration-200">
-                {authMode === 'login' ? 'Entrar na Mesa' : 'Criar Conta Grátis'}
-              </button>
-            </form>
+            <span className="font-serif font-black text-lg tracking-wide text-amber-300">
+              Poker Vision <span className="text-emerald-400 font-mono text-xs px-1.5 py-0.5 rounded bg-emerald-950/60 border border-emerald-700/50">GTO AI</span>
+            </span>
+          </div>
+          <button
+            onClick={() => setShowAuthModal(true)}
+            className="px-5 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold text-sm shadow-md shadow-amber-400/20 transition-all cursor-pointer"
+          >
+            Entrar / Criar Conta Grátis
+          </button>
+        </header>
 
-            <div className="relative flex items-center py-4">
-              <div className="flex-grow border-t border-emerald-800/60"></div>
-              <span className="flex-shrink-0 mx-4 text-emerald-600/80 text-[10px] font-bold uppercase tracking-wider">Ou</span>
-              <div className="flex-grow border-t border-emerald-800/60"></div>
+        {/* Hero Section com Simulador Interativo Imediato */}
+        <section className="px-4 py-12 md:py-20 max-w-5xl mx-auto flex flex-col items-center text-center">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-950/80 border border-emerald-600/50 text-emerald-300 text-xs font-bold mb-6 shadow-inner">
+            <Zap className="w-3.5 h-3.5 text-amber-400" />
+            <span>Teste o Motor GTO Agora (Sem Cadastro Necessário)</span>
+          </div>
+
+          <h1 className="text-3xl md:text-5xl font-black font-serif tracking-tight text-white mb-4 max-w-3xl leading-tight">
+            Pare de perder dinheiro em spots difíceis. Deixe a IA calcular o <span className="text-amber-400">EV perfeito</span>.
+          </h1>
+          <p className="text-sm md:text-base text-slate-300 mb-8 max-w-2xl leading-relaxed">
+            Assistente estratégico de Texas Hold'em para análise pós-sessão e treino de ranges. Veja a recomendação GTO instantânea abaixo:
+          </p>
+
+          {/* Widget Interativo na LP (Aha Moment) */}
+          <div className="w-full bg-[#0c2419] border border-amber-400/30 rounded-3xl p-5 md:p-8 shadow-2xl text-left mb-8 flex flex-col md:flex-row gap-6">
+            <div className="flex-1 flex flex-col gap-3">
+              <label className="text-xs font-bold uppercase tracking-wider text-amber-300">
+                1. Situação de Mesa Exemplo:
+              </label>
+              <div className="p-4 rounded-2xl bg-black/40 border border-emerald-800/60">
+                <div className="font-bold text-sm text-amber-300 mb-1">{sampleSc.title}</div>
+                <p className="text-xs text-slate-300 mb-3">{sampleSc.description}</p>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-mono font-bold bg-amber-400 text-slate-950 px-2.5 py-1 rounded">
+                    Hero: {sampleSc.extraction.hero_hand.join(' ')}
+                  </span>
+                  <span className="text-xs font-mono text-emerald-300 bg-emerald-950 px-2.5 py-1 rounded border border-emerald-700">
+                    Posição: {sampleSc.extraction.position}
+                  </span>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsAuthenticated(true)}
+                className="py-3 px-4 rounded-xl bg-emerald-900/40 border border-emerald-700 text-xs font-bold text-emerald-300 hover:bg-emerald-800/50 transition-all cursor-pointer flex items-center justify-center gap-2"
+              >
+                <Sparkles className="w-4 h-4 text-amber-400" />
+                <span>Abrir App Completo e Testar Outras Mãos</span>
+              </button>
             </div>
 
-            <button 
-              type="button"
-              onClick={handleGoogleAuth}
-              className="w-full py-3 bg-white text-slate-700 font-bold text-xs rounded-xl flex items-center justify-center gap-3 shadow-[0_4px_14px_0_rgba(255,255,255,0.1)] hover:bg-slate-50 active:scale-[0.97] transition-all duration-200"
-            >
-              <svg className="w-4 h-4" viewBox="0 0 24 24">
-                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-              </svg>
-              Continuar com o Google
-            </button>
+            <div className="flex-1 bg-black/40 border border-emerald-800/60 rounded-2xl p-5 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between mb-3 pb-2 border-b border-white/5">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Análise GTO Instantânea</span>
+                  <span className="text-xs font-mono font-bold text-emerald-400">Confiança: 98%</span>
+                </div>
 
-            <div className="mt-5 text-center">
-              <button onClick={() => { setAuthMode(authMode === 'login' ? 'register' : 'login'); setAuthError(''); }} className="text-xs text-slate-400 hover:text-amber-400 transition-colors font-medium">
-                {authMode === 'login' ? 'Novo por aqui? Registe-se' : 'Já tem conta? Inicie sessão'}
-              </button>
+                <div className="mb-4">
+                  <span className="text-[10px] text-slate-400 block uppercase">Ação Recomendada</span>
+                  <span className="text-2xl font-black text-emerald-400">
+                    {initialLpDecision.primaryAction} ({initialLpDecision.recommendedBetSize})
+                  </span>
+                </div>
+
+                <div className="mb-4">
+                  <span className="text-[10px] text-slate-400 block uppercase">Justificativa Tática</span>
+                  <p className="text-xs text-slate-300 leading-relaxed font-medium">
+                    {initialLpDecision.tacticalJustification}
+                  </p>
+                </div>
+              </div>
+
+              <div className="pt-4 border-t border-white/5 flex flex-col gap-2">
+                <button
+                  onClick={() => setShowAuthModal(true)}
+                  className="w-full py-3.5 rounded-xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-black text-sm uppercase tracking-wider shadow-lg shadow-amber-500/30 flex items-center justify-center gap-2 transition-all cursor-pointer"
+                >
+                  <span>Criar Conta Grátis e Usar IA de Câmera</span>
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+                <span className="text-[10px] text-center text-slate-400 flex items-center justify-center gap-1">
+                  <Lock className="w-3 h-3 text-emerald-400" /> Sem cartão de crédito necessário para o plano gratuito.
+                </span>
+              </div>
             </div>
           </div>
         </div>
-      );
-    }
-
-    // --- LANDING PAGE DE ALTA CONVERSÃO ---
-    return (
-      <div className="min-h-screen bg-[#020806] text-slate-100 font-sans selection:bg-amber-400 selection:text-slate-950 relative overflow-x-hidden">
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[400px] bg-emerald-600/10 blur-[140px] pointer-events-none rounded-full"></div>
-        <div className="absolute top-[40%] right-[-10%] w-[500px] h-[500px] bg-amber-500/5 blur-[160px] pointer-events-none rounded-full"></div>
-
-        {/* HEADER / NAVBAR */}
-        <header className="sticky top-0 z-50 bg-[#0c2419]/90 backdrop-blur-md border-b border-emerald-800/40">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400/20 to-amber-600/10 border border-amber-400/50 flex items-center justify-center shadow-[0_0_15px_rgba(251,191,36,0.3)]">
-                <Zap className="w-5 h-5 text-amber-400" />
-              </div>
-              <span className="font-serif text-lg sm:text-xl font-black tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-amber-200 to-amber-500">
-                POKER VISION AI
-              </span>
-            </div>
-
-            <nav className="hidden md:flex items-center gap-8 text-sm font-medium text-slate-300">
-              <a href="#recursos" className="hover:text-amber-400 transition-colors">Recursos</a>
-              <a href="#como-funciona" className="hover:text-amber-400 transition-colors">Como Funciona</a>
-              <a href="#precos" className="hover:text-amber-400 transition-colors">Planos</a>
-              <a href="#faq" className="hover:text-amber-400 transition-colors">FAQ</a>
-            </nav>
-
-            <div className="hidden md:flex items-center gap-4">
-              <button 
-                onClick={() => { setAuthMode('login'); setShowLoginScreen(true); }}
-                className="text-xs font-bold text-emerald-400 hover:text-white px-4 py-2 transition-colors uppercase tracking-wider"
-              >
-                Entrar
-              </button>
-              <button 
-                onClick={() => { setAuthMode('register'); setShowLoginScreen(true); }}
-                className="bg-gradient-to-r from-amber-500 to-amber-400 text-slate-950 text-xs font-black px-5 py-2.5 rounded-xl shadow-[0_0_20px_rgba(245,158,11,0.3)] hover:scale-105 active:scale-95 transition-all uppercase tracking-wider"
-              >
-                Criar Conta Grátis
-              </button>
-            </div>
-
-            <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className="md:hidden p-2 text-emerald-400">
-              {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
-            </button>
-          </div>
-
-          {/* Menu Mobile */}
-          {mobileMenuOpen && (
-            <div className="md:hidden bg-[#0a1f15] border-b border-emerald-800/50 px-4 py-5 flex flex-col gap-4 animate-in slide-in-from-top duration-200">
-              <a href="#recursos" onClick={() => setMobileMenuOpen(false)} className="text-sm font-medium text-slate-300">Recursos</a>
-              <a href="#como-funciona" onClick={() => setMobileMenuOpen(false)} className="text-sm font-medium text-slate-300">Como Funciona</a>
-              <a href="#precos" onClick={() => setMobileMenuOpen(false)} className="text-sm font-medium text-slate-300">Planos</a>
-              <a href="#faq" onClick={() => setMobileMenuOpen(false)} className="text-sm font-medium text-slate-300">FAQ</a>
-              <div className="pt-3 border-t border-emerald-900/60 flex flex-col gap-3">
-                <button onClick={() => { setAuthMode('login'); setShowLoginScreen(true); }} className="w-full py-2.5 text-center text-xs font-bold text-emerald-400 bg-emerald-950/40 rounded-xl">Entrar</button>
-                <button onClick={() => { setAuthMode('register'); setShowLoginScreen(true); }} className="w-full py-2.5 text-center text-xs font-black text-slate-950 bg-gradient-to-r from-amber-500 to-amber-400 rounded-xl shadow-md">Criar Conta Grátis</button>
-              </div>
-            </div>
-          )}
-        </header>
-
-        {/* HERO SECTION */}
-        <section className="relative pt-16 pb-24 md:pt-24 md:pb-32 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto text-center">
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-900/30 border border-emerald-700/40 text-amber-400 text-xs font-bold mb-6 shadow-inner">
-            <Sparkles className="w-3.5 h-3.5" /> Assistente GTO Avançado de Bolso
-          </div>
-          
-          <h1 className="text-4xl sm:text-6xl lg:text-7xl font-black font-serif tracking-tight text-white mb-6 leading-[1.1]">
-            Domine o Pós-Flop e Esmague <br className="hidden sm:inline" />
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-200 via-amber-400 to-amber-500">
-              os Seus Oponentes no Poker
-            </span>
-          </h1>
-
-          <p className="max-w-2xl mx-auto text-base sm:text-lg text-slate-300 mb-10 leading-relaxed font-normal">
-            Obtenha decisões matemáticas GTO instantâneas direto no seu celular. Análises precisas de pré-flop, flop, turn e river para MTT, Cash Games e Spin & Go.
-          </p>
-
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 max-w-md mx-auto mb-16">
-            <button 
-              onClick={() => { setAuthMode('register'); setShowLoginScreen(true); }}
-              className="w-full sm:w-auto px-8 py-4 bg-gradient-to-r from-amber-500 to-amber-400 text-slate-950 font-black rounded-2xl shadow-[0_0_30px_rgba(245,158,11,0.4)] hover:scale-105 active:scale-95 transition-all text-sm uppercase tracking-wider flex items-center justify-center gap-2"
-            >
-              Começar Grátis Agora <ArrowRight className="w-4 h-4" />
-            </button>
-            <a 
-              href="#precos"
-              className="w-full sm:w-auto px-8 py-4 bg-[#0c2419] border border-emerald-800/80 text-emerald-300 font-bold rounded-2xl hover:bg-emerald-950/50 hover:text-white transition-all text-sm uppercase tracking-wider text-center"
-            >
-              Ver Planos PRO
-            </a>
-          </div>
-
-          <div className="relative max-w-4xl mx-auto rounded-3xl p-3 bg-gradient-to-b from-emerald-800/30 to-black/60 border border-emerald-700/40 shadow-[0_0_50px_rgba(5,150,105,0.2)]">
-            <div className="bg-[#05140e] rounded-2xl p-6 sm:p-10 border border-emerald-900/60 flex flex-col items-center">
-              <div className="flex items-center gap-2 mb-6 bg-amber-500/10 border border-amber-500/30 px-3 py-1 rounded-lg text-amber-400 text-xs font-bold">
-                <Crown className="w-3.5 h-3.5" /> Análise GTO em Tempo Real
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 w-full max-w-2xl mb-6">
-                <div className="bg-[#0c2419] border border-emerald-800/50 p-4 rounded-xl text-center">
-                  <span className="text-[10px] text-slate-400 uppercase tracking-widest block mb-1">Ação GTO</span>
-                  <span className="text-lg font-black text-emerald-400">RAISE (75%)</span>
-                </div>
-                <div className="bg-[#0c2419] border border-emerald-800/50 p-4 rounded-xl text-center">
-                  <span className="text-[10px] text-slate-400 uppercase tracking-widest block mb-1">Confiança</span>
-                  <span className="text-lg font-black text-amber-400">95.4%</span>
-                </div>
-                <div className="bg-[#0c2419] border border-emerald-800/50 p-4 rounded-xl text-center">
-                  <span className="text-[10px] text-slate-400 uppercase tracking-widest block mb-1">EV Estimado</span>
-                  <span className="text-lg font-black text-emerald-400">+4.5 BB</span>
-                </div>
-                <div className="bg-[#0c2419] border border-emerald-800/50 p-4 rounded-xl text-center">
-                  <span className="text-[10px] text-slate-400 uppercase tracking-widest block mb-1">Risco</span>
-                  <span className="text-lg font-black text-amber-400">MÉDIO</span>
-                </div>
-              </div>
-              <p className="text-xs text-slate-400 italic">"Interface leve, intuitiva e desenvolvida por jogadores para otimizar o seu winrate."</p>
-            </div>
-          </div>
-        </section>
-
-        {/* RECURSOS / BENEFÍCIOS */}
-        <section id="recursos" className="py-20 bg-[#05140e]/50 border-t border-emerald-900/30">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="text-center max-w-3xl mx-auto mb-16">
-              <h2 className="text-3xl sm:text-4xl font-black font-serif text-white mb-4">Por que os melhores jogadores escolhem o Poker Vision AI?</h2>
-              <p className="text-sm sm:text-base text-slate-400">Ferramentas de desktop pesadas exigem configurações complexas. O nosso assistente entrega a resposta certa em segundos.</p>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-              <div className="bg-[#0c2419]/80 border border-emerald-800/50 rounded-3xl p-8 shadow-xl hover:border-amber-400/50 transition-all group">
-                <div className="w-12 h-12 rounded-2xl bg-amber-400/10 border border-amber-400/40 flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
-                  <Zap className="w-6 h-6 text-amber-400" />
-                </div>
-                <h3 className="text-xl font-bold text-white mb-3">Respostas Instantâneas</h3>
-                <p className="text-sm text-slate-400 leading-relaxed">Insira as suas cartas, selecione a posição e stack em segundos para receber a jogada ideal baseada em teoria de jogos.</p>
-              </div>
-
-              <div className="bg-[#0c2419]/80 border border-emerald-800/50 rounded-3xl p-8 shadow-xl hover:border-amber-400/50 transition-all group">
-                <div className="w-12 h-12 rounded-2xl bg-amber-400/10 border border-amber-400/40 flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
-                  <Crown className="w-6 h-6 text-amber-400" />
-                </div>
-                <h3 className="text-xl font-bold text-white mb-3">Motor Pós-Flop PRO</h3>
-                <p className="text-sm text-slate-400 leading-relaxed">Desbloqueie análises completas de texturas de board (Flop, Turn e River) para extrair valor máximo dos seus oponentes.</p>
-              </div>
-
-              <div className="bg-[#0c2419]/80 border border-emerald-800/50 rounded-3xl p-8 shadow-xl hover:border-amber-400/50 transition-all group">
-                <div className="w-12 h-12 rounded-2xl bg-amber-400/10 border border-amber-400/40 flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
-                  <ShieldCheck className="w-6 h-6 text-amber-400" />
-                </div>
-                <h3 className="text-xl font-bold text-white mb-3">100% Otimizado p/ Celular</h3>
-                <p className="text-sm text-slate-400 leading-relaxed">Projetado especificamente para rodar perfeitamente no navegador do seu celular enquanto joga online ou ao vivo.</p>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* COMO FUNCIONA */}
-        <section id="como-funciona" className="py-20 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
-          <div className="text-center max-w-3xl mx-auto mb-16">
-            <h2 className="text-3xl sm:text-4xl font-black font-serif text-white mb-4">Como Funciona em 3 Passos Simples</h2>
-            <p className="text-sm sm:text-base text-slate-400">Sem complicações técnicas. Comece a melhorar o seu jogo imediatamente.</p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            <div className="bg-[#0c2419]/50 border border-emerald-800/40 rounded-3xl p-8 relative">
-              <span className="absolute -top-4 left-8 w-10 h-10 rounded-xl bg-amber-500 text-slate-950 font-black flex items-center justify-center text-lg shadow-lg">1</span>
-              <h3 className="text-lg font-bold text-white mb-3 mt-2">Escolha o Modo de Jogo</h3>
-              <p className="text-sm text-slate-400">Selecione se está a jogar Cash Game, MTT / SNG ou Spin & Go com o stack efetivo correspondente.</p>
-            </div>
-
-            <div className="bg-[#0c2419]/50 border border-emerald-800/40 rounded-3xl p-8 relative">
-              <span className="absolute -top-4 left-8 w-10 h-10 rounded-xl bg-amber-500 text-slate-950 font-black flex items-center justify-center text-lg shadow-lg">2</span>
-              <h3 className="text-lg font-bold text-white mb-3 mt-2">Selecione as Cartas</h3>
-              <p className="text-sm text-slate-400">Insira as suas 2 cartas de mão e, no plano PRO, adicione opcionalmente as cartas comunitárias do board.</p>
-            </div>
-
-            <div className="bg-[#0c2419]/50 border border-emerald-800/40 rounded-3xl p-8 relative">
-              <span className="absolute -top-4 left-8 w-10 h-10 rounded-xl bg-amber-500 text-slate-950 font-black flex items-center justify-center text-lg shadow-lg">3</span>
-              <h3 className="text-lg font-bold text-white mb-3 mt-2">Execute a Jogada GTO</h3>
-              <p className="text-sm text-slate-400">Receba instantaneamente a ação recomendada, sizing exato, taxa de confiança e justificativa matemática.</p>
-            </div>
-          </div>
-        </section>
-
-        {/* PLANOS E PREÇOS */}
-        <section id="precos" className="py-20 bg-[#05140e]/50 border-t border-emerald-900/30">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="text-center max-w-3xl mx-auto mb-16">
-              <h2 className="text-3xl sm:text-4xl font-black font-serif text-white mb-4">Planos Acessíveis para Todos os Jogadores</h2>
-              <p className="text-sm sm:text-base text-slate-400">Invista menos do que o valor de um buy-in e tenha a ferramenta mais afiada do mercado.</p>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-5xl mx-auto">
-              {/* Mensal */}
-              <div className="bg-[#0c2419] border border-emerald-800/60 rounded-3xl p-8 flex flex-col justify-between shadow-xl">
-                <div>
-                  <h3 className="text-lg font-bold text-white mb-2">Plano Mensal</h3>
-                  <p className="text-xs text-slate-400 mb-6">Flexibilidade total para testar e lucrar.</p>
-                  <div className="text-3xl font-black text-amber-400 mb-6">R$ 29,90 <span className="text-xs font-normal text-slate-400">/mês</span></div>
-                  <ul className="flex flex-col gap-3 text-xs text-slate-300 mb-8">
-                    <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-400" /> Acesso a todos os modos (MTT, Cash, Spin)</li>
-                    <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-400" /> Motor PRO de Pós-Flop desbloqueado</li>
-                    <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-400" /> Atualizações automáticas GTO</li>
-                  </ul>
-                </div>
-                <button 
-                  onClick={() => { setSelectedPlan('mensal'); setShowUpgradeModal(true); }}
-                  className="w-full py-3.5 bg-emerald-800/40 hover:bg-emerald-700 text-white font-black rounded-xl text-xs uppercase tracking-wider transition-all border border-emerald-700/60"
-                >
-                  Assinar Mensal
-                </button>
-              </div>
-
-              {/* Semestral */}
-              <div className="bg-[#0c2419] border border-emerald-800/60 rounded-3xl p-8 flex flex-col justify-between shadow-xl">
-                <div>
-                  <h3 className="text-lg font-bold text-white mb-2">Plano Semestral</h3>
-                  <p className="text-xs text-slate-400 mb-6">Ideal para grind consistente de 6 meses.</p>
-                  <div className="text-3xl font-black text-amber-400 mb-6">R$ 149,90 <span className="text-xs font-normal text-slate-400">/semestre</span></div>
-                  <ul className="flex flex-col gap-3 text-xs text-slate-300 mb-8">
-                    <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-400" /> Todos os benefícios do PRO</li>
-                    <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-400" /> Economia em relação ao mensal</li>
-                    <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-400" /> Suporte prioritário via WhatsApp</li>
-                  </ul>
-                </div>
-                <button 
-                  onClick={() => { setSelectedPlan('semestral'); setShowUpgradeModal(true); }}
-                  className="w-full py-3.5 bg-emerald-800/40 hover:bg-emerald-700 text-white font-black rounded-xl text-xs uppercase tracking-wider transition-all border border-emerald-700/60"
-                >
-                  Assinar Semestral
-                </button>
-              </div>
-
-              {/* Anual (Destaque) */}
-              <div className="bg-gradient-to-b from-[#0c2419] to-[#05140e] border-2 border-amber-500/50 rounded-3xl p-8 flex flex-col justify-between shadow-[0_0_30px_rgba(245,158,11,0.15)] relative transform md:-translate-y-2">
-                <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 bg-amber-500 text-slate-950 font-black text-[10px] px-3 py-1 rounded-full uppercase tracking-widest shadow-md">
-                  Mais Popular (-30%)
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-white mb-2 mt-1">Plano Anual</h3>
-                  <p className="text-xs text-slate-400 mb-6">Para profissionais e regs focados em longo prazo.</p>
-                  <div className="text-3xl font-black text-amber-400 mb-6">R$ 249,90 <span className="text-xs font-normal text-slate-400">/ano</span></div>
-                  <ul className="flex flex-col gap-3 text-xs text-slate-300 mb-8">
-                    <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-amber-400" /> Acesso total por 365 dias</li>
-                    <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-amber-400" /> Maior desconto da plataforma</li>
-                    <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-amber-400" /> Acesso antecipado a novos recursos</li>
-                  </ul>
-                </div>
-                <button 
-                  onClick={() => { setSelectedPlan('anual'); setShowUpgradeModal(true); }}
-                  className="w-full py-3.5 bg-gradient-to-r from-amber-500 to-amber-400 hover:scale-[1.02] text-slate-950 font-black rounded-xl text-xs uppercase tracking-wider transition-all shadow-[0_0_20px_rgba(245,158,11,0.4)]"
-                >
-                  Assinar Anual PRO
-                </button>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* FAQ (DÚVIDAS FREQUENTES) */}
-        <section id="faq" className="py-20 px-4 sm:px-6 lg:px-8 max-w-4xl mx-auto">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl sm:text-4xl font-black font-serif text-white mb-4">Dúvidas Frequentes (FAQ)</h2>
-            <p className="text-sm text-slate-400">Tudo o que precisa de saber antes de começar.</p>
-          </div>
-
-          <div className="flex flex-col gap-4">
-            {[
-              {
-                q: "Como recebo o acesso PRO após o pagamento?",
-                a: "A liberação é 100% automática e instantânea logo após a confirmação do pagamento via Mercado Pago (Pix ou Cartão). A coroa dourada acende na hora no seu app."
-              },
-              {
-                q: "Funciona em celulares e computadores?",
-                a: "Sim! O Poker Vision AI foi totalmente otimizado para rodar perfeitamente tanto no navegador do seu celular quanto no computador."
-              },
-              {
-                q: "Posso cancelar a assinatura quando quiser?",
-                a: "Sim, no plano mensal você tem total liberdade de gerenciar ou cancelar a sua assinatura de forma simples a qualquer momento."
-              },
-              {
-                q: "As decisões são baseadas em GTO real?",
-                a: "Sim, todas as matrizes e algoritmos de cálculo seguem rigorosamente a Teoria de Jogos Ótima (GTO) e conceitos avançados de EV."
-              }
-            ].map((faq, idx) => (
-              <div key={idx} className="bg-[#0c2419]/70 border border-emerald-800/50 rounded-2xl overflow-hidden transition-all">
-                <button 
-                  onClick={() => setActiveFaq(activeFaq === idx ? null : idx)}
-                  className="w-full p-5 text-left font-bold text-sm sm:text-base text-white flex items-center justify-between gap-4"
-                >
-                  <span>{faq.q}</span>
-                  <ChevronDown className={`w-5 h-5 text-amber-400 transition-transform ${activeFaq === idx ? 'rotate-180' : ''}`} />
-                </button>
-                {activeFaq === idx && (
-                  <div className="px-5 pb-5 text-xs sm:text-sm text-slate-300 leading-relaxed border-t border-emerald-900/40 pt-3">
-                    {faq.a}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        </section>
-
-        {/* FOOTER */}
-        <footer className="bg-[#020806] border-t border-emerald-900/40 py-12 px-4 sm:px-6 lg:px-8 text-center text-xs text-slate-400">
-          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-6">
-            <div className="flex items-center gap-2">
-              <Zap className="w-4 h-4 text-amber-400" />
-              <span className="font-serif font-bold text-white">Poker Vision AI</span>
-            </div>
-            <div className="flex items-center gap-6">
-              <button onClick={() => setActiveModal('terms')} className="hover:text-amber-400 transition-colors">Termos de Uso</button>
-              <button onClick={() => setActiveModal('privacy')} className="hover:text-amber-400 transition-colors">Política de Privacidade</button>
-              <a href={whatsappUrl} target="_blank" rel="noopener noreferrer" className="hover:text-emerald-400 transition-colors flex items-center gap-1 font-bold text-emerald-400">
-                <MessageSquare className="w-3.5 h-3.5" /> Suporte WhatsApp
-              </a>
-            </div>
-            <div>
-              © 2026 Poker Vision AI. Todos os direitos reservados.
-            </div>
-          </div>
-        </footer>
-
-        {/* MODAL DE UPGRADE / PLANOS (DA LANDING PAGE) */}
-        {showUpgradeModal && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm transition-all">
-            <div className="bg-[#0a1f15] border border-amber-500/30 w-full max-w-sm rounded-[2rem] p-6 shadow-[0_0_40px_rgba(5,20,14,0.9)] text-center relative overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-              <div className="absolute top-[-50px] left-1/2 -translate-x-1/2 w-32 h-32 bg-amber-500/20 rounded-full blur-[40px]"></div>
-              <Crown className="w-12 h-12 text-amber-400 mx-auto mb-3 drop-shadow-[0_0_10px_rgba(251,191,36,0.6)] relative z-10" />
-              <h2 className="text-xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white to-slate-300 mb-2 relative z-10">Desbloqueie o Motor PRO</h2>
-              <p className="text-slate-400 text-xs mb-5 leading-relaxed relative z-10">
-                Escolha o seu plano ideal e domine o Pós-Flop com análises matemáticas avançadas.
-              </p>
-
-              <div className="grid grid-cols-3 gap-2 mb-5 relative z-10">
-                {[
-                  { id: 'mensal', name: 'Mensal', price: 'R$ 29,90' },
-                  { id: 'semestral', name: 'Semestral', price: 'R$ 149,90' },
-                  { id: 'anual', name: 'Anual', price: 'R$ 249,90', badge: '-30%' }
-                ].map(p => (
-                  <button
-                    key={p.id}
-                    onClick={() => setSelectedPlan(p.id as any)}
-                    className={`p-2.5 rounded-xl border flex flex-col items-center justify-center transition-all relative ${selectedPlan === p.id ? 'bg-amber-400/20 border-amber-400 text-white shadow-[0_0_15px_rgba(245,158,11,0.2)]' : 'bg-[#05140e] border-emerald-800/60 text-slate-400 hover:border-emerald-600'}`}
-                  >
-                    {p.badge && <span className="absolute -top-2 bg-amber-500 text-slate-950 text-[8px] font-black px-1.5 py-0.2 rounded-full">{p.badge}</span>}
-                    <span className="text-[11px] font-bold">{p.name}</span>
-                    <span className="text-xs font-black text-amber-400 mt-0.5">{p.price}</span>
-                  </button>
-                ))}
-              </div>
-              
-              <div className="flex flex-col gap-3 relative z-10">
-                {checkoutError && (
-                  <div className="bg-red-950/40 text-red-400 text-xs py-2 px-3 rounded-lg border border-red-900/50 flex items-center justify-center gap-1.5">
-                    <AlertCircle className="w-4 h-4" /> {checkoutError}
-                  </div>
-                )}
-                
-                <button 
-                  onClick={() => handlePayment(selectedPlan)} 
-                  disabled={isCheckoutLoading}
-                  className="w-full py-3.5 bg-gradient-to-r from-amber-500 to-amber-400 text-slate-950 font-black rounded-xl shadow-[0_0_20px_rgba(245,158,11,0.3)] hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-2 text-sm uppercase tracking-wider"
-                >
-                  {isCheckoutLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : `Assinar Plano ${selectedPlan}`}
-                </button>
-                <button onClick={() => setShowUpgradeModal(false)} className="text-xs font-bold text-slate-500 hover:text-white py-1 transition-colors">
-                  Fechar
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* MODAIS LEGAIS (TERMOS E PRIVACIDADE) */}
-        {activeModal && (
-          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-            <div className="bg-[#0a1f15] border border-emerald-800 w-full max-w-lg rounded-3xl p-6 sm:p-8 max-h-[80vh] overflow-y-auto relative">
-              <button onClick={() => setActiveModal(null)} className="absolute top-5 right-5 text-slate-400 hover:text-white"><X className="w-5 h-5" /></button>
-              <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                <FileText className="w-5 h-5 text-amber-400" />
-                {activeModal === 'terms' ? 'Termos de Uso' : 'Política de Privacidade'}
-              </h3>
-              <div className="text-xs sm:text-sm text-slate-300 leading-relaxed flex flex-col gap-3">
-                {activeModal === 'terms' ? (
-                  <>
-                    <p>Bem-vindo ao Poker Vision AI. Ao utilizar a nossa aplicação, concorda com os presentes termos de serviço e condições de utilização.</p>
-                    <p><strong>1. Utilização do Serviço:</strong> O Poker Vision AI é uma ferramenta de apoio e estudo baseada em GTO (Game Theory Optimal) destinada a auxiliar jogadores na tomada de decisão estratégica.</p>
-                    <p><strong>2. Pagamentos e Assinaturas:</strong> Os planos são cobrados antecipadamente através do Mercado Pago. As renovações e acessos seguem o período contratado (mensal, semestral ou anual).</p>
-                    <p><strong>3. Responsabilidade:</strong> O utilizador é o único responsável pelas decisões tomadas nas mesas de jogo reais ou virtuais.</p>
-                  </>
-                ) : (
-                  <>
-                    <p>A sua privacidade é fundamental para nós. Esta política descreve como recolhemos e tratamos as suas informações.</p>
-                    <p><strong>1. Dados Recolhidos:</strong> Recolhemos o seu endereço de e-mail através do processo de autenticação (Firebase) estritamente para gerir o seu acesso e status de utilizador PRO.</p>
-                    <p><strong>2. Pagamentos seguros:</strong> Todos os pagamentos são processados diretamente pelo Mercado Pago, não armazenamos dados de cartões de crédito no nosso servidor.</p>
-                    <p><strong>3. Segurança:</strong> Utilizamos protocolos criptografados e Firebase Firestore para garantir a integridade e segurança dos seus dados.</p>
-                  </>
-                )}
-              </div>
-              <button onClick={() => setActiveModal(null)} className="mt-6 w-full py-3 bg-emerald-800 text-white font-bold rounded-xl text-xs uppercase">Entendido</button>
-            </div>
-          </div>
-        )}
       </div>
     );
   }
 
-  // --- SE O UTILIZADOR JÁ ESTIVER LOGADO: EXIBE A APLICAÇÃO DE POKER GTO ---
-  return (
-    <div className="min-h-screen bg-[#020806] text-slate-100 flex flex-col font-sans select-none pb-12 relative">
-      <header className="px-4 pt-3 pb-2 bg-[#0c2419]/95 backdrop-blur-md border-b border-emerald-800/60 shadow-lg sticky top-0 z-20">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <div className={`w-9 h-9 rounded-xl flex items-center justify-center border transition-all duration-300 ${isCalculating ? 'bg-amber-400 border-amber-300 shadow-[0_0_20px_rgba(251,191,36,0.6)] scale-105' : 'bg-amber-400/10 border-amber-400/50'}`}>
-              <Zap className={`w-5 h-5 ${isCalculating ? 'text-slate-900 animate-pulse' : 'text-amber-400'}`} />
-            </div>
-            <div>
-              <h1 className="text-base font-black text-transparent bg-clip-text bg-gradient-to-r from-amber-200 to-amber-500 font-serif leading-none flex items-center gap-1.5">
-                POKER VISION {isProUser ? <Crown className="w-4 h-4 text-amber-400 drop-shadow-[0_0_5px_rgba(251,191,36,0.8)]" /> : <span className="px-1.5 py-0.5 bg-slate-800 border border-slate-700 text-[9px] rounded text-slate-400 font-bold">FREE</span>}
-              </h1>
-              <div className="flex items-center gap-2 mt-0.5">
-                <span className="text-[10px] text-emerald-400/70 font-medium truncate max-w-[130px] block">{user.email}</span>
-                {isProUser && daysRemaining !== null && (
-                  <span className="text-[9px] bg-amber-500/20 text-amber-400 px-1.5 py-0.2 rounded border border-amber-500/30 font-bold flex items-center gap-1">
-                    <Clock className="w-2.5 h-2.5" /> {daysRemaining}d restantes
-                  </span>
-                )}
-              </div>
-            </div>
+  // --- MODAL DE AUTENTICAÇÃO SIMULADO/FIREBASE ---
+  if (showAuthModal && !isAuthenticated) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md">
+        <div className="w-full max-w-md bg-[#0c2419] border border-amber-400/40 rounded-3xl p-6 shadow-2xl text-slate-100 flex flex-col gap-4">
+          <div className="flex items-center justify-between pb-3 border-b border-emerald-800/60">
+            <h3 className="text-lg font-bold text-amber-300 font-serif">Acesse o Poker Vision AI</h3>
+            <button onClick={() => setShowAuthModal(false)} className="text-slate-400 hover:text-white font-bold">✕</button>
           </div>
-          <div className="flex gap-2">
-            {!isProUser && (
-              <button onClick={() => setShowUpgradeModal(true)} className="px-3 py-1.5 bg-gradient-to-r from-amber-500 to-amber-400 text-slate-950 font-black text-xs rounded-xl shadow-md flex items-center gap-1">
-                <Crown className="w-3.5 h-3.5" /> PRO
-              </button>
-            )}
-            <button onClick={resetTable} className="p-2 rounded-xl bg-emerald-950/50 border border-emerald-800 text-emerald-400 hover:bg-emerald-900 hover:text-white active:scale-90 transition-all"><RotateCcw className="w-4 h-4" /></button>
-            <button onClick={() => signOut(auth)} className="p-2 rounded-xl bg-red-950/30 border border-red-900/40 text-red-400 hover:bg-red-900/60 hover:text-white active:scale-90 transition-all"><LogOut className="w-4 h-4" /></button>
+          <p className="text-xs text-slate-300">Entre com sua conta para desbloquear análises ilimitadas, captura por câmera e histórico de sessões.</p>
+          <button
+            onClick={() => {
+              setIsAuthenticated(true);
+              setShowAuthModal(false);
+            }}
+            className="w-full py-3.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-sm uppercase tracking-wider shadow-lg shadow-amber-400/30 cursor-pointer"
+          >
+            Entrar com Google / E-mail
+          </button>
+          <button
+            onClick={() => setShowAuthModal(false)}
+            className="text-xs text-slate-400 hover:text-white text-center underline cursor-pointer"
+          >
+            Voltar para a página inicial
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // --- APLICAÇÃO PRINCIPAL (DASHBOARD LOGADO) ---
+  return (
+    <div className="min-h-screen bg-[#06130d] text-slate-100 font-sans selection:bg-amber-400 selection:text-slate-950 pb-20">
+      {/* Top Header */}
+      <header className="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-emerald-900/50 bg-[#081a12]/90 backdrop-blur sticky top-0 z-40">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-300 to-amber-600 flex items-center justify-center font-black text-slate-950 shadow-lg shadow-amber-500/20">
+            PV
+          </div>
+          <div>
+            <h1 className="font-serif font-black text-sm sm:text-base tracking-wide text-amber-300 leading-tight">
+              Poker Vision AI
+            </h1>
+            <span className="text-[10px] font-mono text-emerald-400 flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" /> Motor GTO Ativo
+            </span>
           </div>
         </div>
-        <div className="flex p-1 bg-black/40 rounded-xl border border-emerald-900/40 shadow-inner">
-          {[{ id: 'CASH', label: 'CASH', icon: <Coins className="w-3.5 h-3.5" /> }, { id: 'MTT', label: 'MTT / SNG', icon: <Trophy className="w-3.5 h-3.5" /> }, { id: 'SPIN', label: 'SPIN & GO', icon: <Swords className="w-3.5 h-3.5" /> }].map(m => (
-            <button key={m.id} onClick={() => handleModeChange(m.id as GameMode)} className={`flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-bold rounded-lg transition-all duration-200 ${gameMode === m.id ? 'bg-gradient-to-t from-emerald-700 to-emerald-600 text-white shadow-md' : 'text-emerald-500/60 hover:text-emerald-300 hover:bg-emerald-900/30'}`}>{m.icon} {m.label}</button>
-          ))}
+
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setIsRangeMatrixOpen(true)}
+            className="px-3 py-1.5 rounded-xl bg-emerald-950 border border-emerald-700/60 hover:border-amber-400 text-xs font-bold text-emerald-200 flex items-center gap-1.5 cursor-pointer transition-all"
+          >
+            <Grid className="w-3.5 h-3.5 text-amber-400" />
+            <span className="hidden sm:inline">Matriz 13x13</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIsCaptureOpen(true)}
+            className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-md shadow-amber-500/20 cursor-pointer transition-all"
+          >
+            <Camera className="w-3.5 h-3.5" />
+            <span>Capturar Mesa</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIsAuthenticated(false)}
+            title="Sair"
+            className="p-2 rounded-xl bg-emerald-950/80 border border-emerald-800 text-slate-400 hover:text-rose-400 cursor-pointer"
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
         </div>
       </header>
 
-      <main className="flex-1 p-3 max-w-md mx-auto w-full flex flex-col gap-3">
-        <div className="bg-[#0c2419] border border-emerald-800/50 rounded-2xl p-3 shadow-lg transition-all hover:border-emerald-700/60">
-          <span className="text-[11px] font-bold text-amber-400/80 uppercase tracking-widest block mb-2">1. Suas Cartas</span>
-          <div onClick={() => { setHeroHand([]); setPickerTarget('hero'); }} className="flex justify-center gap-3 p-4 bg-[#05140e] rounded-xl border border-dashed border-emerald-800/80 cursor-pointer hover:bg-emerald-950/30 transition-colors group">
-            {heroHand.length === 2 ? heroHand.map((c, i) => (
-              <div key={i} className="w-16 h-22 bg-white text-slate-900 rounded-lg flex flex-col items-center justify-between p-1.5 shadow-[0_4px_10px_rgba(0,0,0,0.3)] font-black text-lg transform transition-transform group-hover:scale-105">
-                <span className={c.includes('h') || c.includes('d') ? 'text-red-600' : 'text-slate-900'}>{c[0]}</span>
-                <span className={`text-2xl ${c.includes('h') || c.includes('d') ? 'text-red-600' : 'text-slate-900'}`}>{c.includes('s') ? '♠' : c.includes('h') ? '♥' : c.includes('d') ? '♦' : '♣'}</span>
-              </div>
-            )) : <div className="py-4 text-emerald-600 font-bold text-sm group-hover:text-amber-400 transition-colors flex items-center gap-2">Toque para selecionar <span className="animate-bounce">👇</span></div>}
-          </div>
+      {/* Main Content Area */}
+      <main className="max-w-4xl mx-auto p-3 sm:p-5 flex flex-col gap-5">
+        {/* Scenario Quick Presets Bar */}
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+          <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 shrink-0">
+            Exemplos:
+          </span>
+          {SAMPLE_SCENARIOS.map((sc) => (
+            <button
+              key={sc.id}
+              type="button"
+              onClick={() => handleScenarioSelected(sc)}
+              className="px-3 py-1 rounded-xl bg-[#0c2419] border border-emerald-800/60 hover:border-amber-400/80 text-xs text-emerald-200 shrink-0 transition-all cursor-pointer font-medium"
+            >
+              {sc.title}
+            </button>
+          ))}
         </div>
 
-        <div className="relative bg-[#0c2419] border border-emerald-800/50 rounded-2xl p-3 shadow-lg overflow-hidden transition-all hover:border-emerald-700/60">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-bold text-amber-400/80 uppercase tracking-widest">2. Board (Pós-Flop)</span>
-            {!isProUser && <span className="bg-amber-500/20 text-amber-400 text-[9px] px-2 py-0.5 rounded border border-amber-500/30 font-bold flex gap-1 items-center shadow-[0_0_8px_rgba(245,158,11,0.2)]"><Lock className="w-3 h-3" /> PRO</span>}
-          </div>
-          <div onClick={() => { if (!isProUser) { setShowUpgradeModal(true); return; } setPickerTarget('board'); }} className={`flex justify-center gap-1.5 p-4 rounded-xl border border-dashed cursor-pointer transition-all ${isProUser ? 'bg-[#05140e] border-emerald-800/80 hover:bg-emerald-950/30 group' : 'bg-[#020806]/80 border-emerald-900/50 blur-[3px] scale-[0.98]'}`}>
-            {[1, 2, 3, 4, 5].map((_, i) => {
-              const c = boardCards[i];
-              return c ? (
-                <div key={i} className={`w-11 h-16 bg-white rounded-md flex flex-col items-center justify-between p-1 shadow-md font-black text-sm ${isProUser && 'transform transition-transform group-hover:scale-105'}`}>
-                  <span className={c.includes('h') || c.includes('d') ? 'text-red-600' : 'text-slate-900'}>{c[0]}</span>
-                  <span className={c.includes('h') || c.includes('d') ? 'text-red-600' : 'text-slate-900'}>{c.includes('s') ? '♠' : c.includes('h') ? '♥' : c.includes('d') ? '♦' : '♣'}</span>
-                </div>
-              ) : <div key={i} className="w-11 h-16 bg-[#0c2419] rounded-md border border-emerald-800/50 flex items-center justify-center text-emerald-700 text-xs font-bold">{i < 3 ? 'F' : i === 3 ? 'T' : 'R'}</div>;
-            })}
-          </div>
-          {!isProUser && (
-            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/50 backdrop-blur-[1px]">
-              <button onClick={() => setShowUpgradeModal(true)} className="bg-gradient-to-r from-amber-500 to-amber-400 text-slate-950 text-xs font-black px-5 py-2.5 rounded-full flex items-center gap-2 shadow-[0_0_15px_rgba(245,158,11,0.4)] hover:scale-105 active:scale-95 transition-all">
-                <Lock className="w-3.5 h-3.5" /> Desbloquear Board
-              </button>
-            </div>
-          )}
-        </div>
+        {/* Table Cards Visual Component */}
+        <TableCardsView
+          heroHand={heroHand}
+          board={board}
+          stage={stage}
+          onCardSlotClick={(target, boardIdx) => {
+            if (target === 'hero1') {
+              setCardPickerConfig({ isOpen: true, title: 'Selecione a 1ª Carta do Hero', maxCards: 2, target: 'hero1' });
+            } else if (target === 'hero2') {
+              setCardPickerConfig({ isOpen: true, title: 'Selecione a 2ª Carta do Hero', maxCards: 2, target: 'hero2' });
+            } else if (target === 'board') {
+              setCardPickerConfig({ isOpen: true, title: `Selecione a Carta ${ (boardIdx || 0) + 1 } do Board`, maxCards: 5, target: 'board', boardIndex: boardIdx });
+            }
+          }}
+          onRemoveCard={(target, index) => {
+            if (target === 'hero') {
+              const updated = [...heroHand];
+              updated[index] = '';
+              setHeroHand(updated.filter(Boolean));
+            } else if (target === 'board') {
+              const updated = [...board];
+              updated.splice(index, 1);
+              setBoard(updated);
+            }
+          }}
+        />
 
-        <div className="bg-[#0c2419] border border-emerald-800/50 rounded-2xl p-3 shadow-lg">
-          <span className="text-[11px] font-bold text-amber-400/80 uppercase tracking-widest block mb-2">3. Stack Efetivo</span>
-          <div className="grid grid-cols-3 gap-2">
-            {[{ id: 'low', label: 'LOW' }, { id: 'medium', label: 'MEDIUM' }, { id: 'deep', label: 'DEEP' }].map(s => (
-              <button key={s.id} onClick={() => setStackDepth(s.id as StackDepth)} className={`py-2.5 rounded-xl text-center font-bold text-xs transition-all active:scale-95 ${stackDepth === s.id ? 'bg-amber-400 text-slate-950 shadow-[0_2px_10px_rgba(251,191,36,0.3)] border-amber-300' : 'bg-[#05140e] border border-emerald-800/60 text-emerald-400 hover:border-emerald-600'}`}>{s.label}</button>
-            ))}
-          </div>
-        </div>
+        {/* Quick Chips & Table Parameters Panel */}
+        <QuickChipsPanel
+          position={position}
+          onPositionChange={setPosition}
+          stackBB={stackBB}
+          onStackChange={setStackBB}
+          villains={villains}
+          onVillainsChange={setVillains}
+          actionToHero={actionToHero}
+          onActionChange={setActionToHero}
+          stage={stage}
+          onStageChange={setStage}
+        />
 
-        <div className="grid grid-cols-2 gap-3">
-          <div className="bg-[#0c2419] border border-emerald-800/50 rounded-2xl p-3 shadow-lg">
-            <span className="text-[11px] font-bold text-amber-400/80 uppercase tracking-widest block mb-2">4. Posição</span>
-            <div className="grid grid-cols-2 gap-1.5">
-              {activePositions.map(pos => <button key={pos} onClick={() => handlePositionChange(pos)} className={`py-2 rounded-lg text-xs font-black transition-all active:scale-95 ${position === pos ? 'bg-emerald-500 text-slate-950 shadow-[0_2px_8px_rgba(16,185,129,0.4)] border-emerald-400' : 'bg-[#05140e] border border-emerald-800/60 text-emerald-500 hover:border-emerald-600'}`}>{pos}</button>)}
-            </div>
-          </div>
-          <div className="bg-[#0c2419] border border-emerald-800/50 rounded-2xl p-3 shadow-lg">
-            <span className="text-[11px] font-bold text-amber-400/80 uppercase tracking-widest block mb-2">5. Ação Prév.</span>
-            <div className="flex flex-col gap-1.5">
-              {[{ id: 'unopened', label: 'Mesa em Fold' }, { id: 'limp', label: 'Limpers' }, { id: 'raise', label: 'Raise Prévio' }].map(act => (
-                <button key={act.id} onClick={() => handleActionChange(act.id as any)} className={`py-2 px-1 rounded-lg font-bold text-xs transition-all active:scale-95 ${actionToHero === act.id ? 'bg-amber-400 text-slate-950 shadow-[0_2px_8px_rgba(251,191,36,0.3)] border-amber-300' : 'bg-[#05140e] border border-emerald-800/60 text-emerald-500 hover:border-emerald-600'}`}>{act.label}</button>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        <div className={`mt-2 mb-8 transition-opacity duration-300 ${isCalculating ? 'opacity-40 scale-[0.98]' : 'opacity-100 scale-100'}`}>
-          <DecisionDisplay decision={decision} />
-        </div>
+        {/* Decision GTO Result Display */}
+        <DecisionDisplay decision={decision} />
       </main>
 
-      {showUpgradeModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm transition-all duration-300">
-          <div className="bg-[#0a1f15] border border-amber-500/30 w-full max-w-sm rounded-[2rem] p-6 shadow-[0_0_40px_rgba(5,20,14,0.9)] text-center relative overflow-hidden transform animate-in fade-in zoom-in-95 duration-200">
-            <div className="absolute top-[-50px] left-1/2 transform -translate-x-1/2 w-32 h-32 bg-amber-500/20 rounded-full blur-[40px]"></div>
-            <Crown className="w-12 h-12 text-amber-400 mx-auto mb-3 drop-shadow-[0_0_10px_rgba(251,191,36,0.6)] relative z-10" />
-            <h2 className="text-xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white to-slate-300 mb-2 relative z-10">Desbloqueie o Motor PRO</h2>
-            <p className="text-slate-400 text-xs mb-5 leading-relaxed relative z-10">
-              Escolha o seu plano ideal e domine o Pós-Flop com análises matemáticas avançadas.
-            </p>
+      {/* --- MODAIS DO SISTEMA --- */}
+      <CaptureModal
+        isOpen={isCaptureOpen}
+        onClose={() => setIsCaptureOpen(false)}
+        onImageCaptured={handleImageCaptured}
+        onScenarioSelected={(sc) => {
+          handleScenarioSelected(sc);
+          setIsCaptureOpen(false);
+        }}
+        isProcessing={isProcessingVision}
+      />
 
-            <div className="grid grid-cols-3 gap-2 mb-5 relative z-10">
-              {[
-                { id: 'mensal', name: 'Mensal', price: 'R$ 29,90' },
-                { id: 'semestral', name: 'Semestral', price: 'R$ 149,90' },
-                { id: 'anual', name: 'Anual', price: 'R$ 249,90', badge: '-30%' }
-              ].map(p => (
-                <button
-                  key={p.id}
-                  onClick={() => setSelectedPlan(p.id as any)}
-                  className={`p-2.5 rounded-xl border flex flex-col items-center justify-center transition-all relative ${selectedPlan === p.id ? 'bg-amber-400/20 border-amber-400 text-white shadow-[0_0_15px_rgba(245,158,11,0.2)]' : 'bg-[#05140e] border-emerald-800/60 text-slate-400 hover:border-emerald-600'}`}
-                >
-                  {p.badge && <span className="absolute -top-2 bg-amber-500 text-slate-950 text-[8px] font-black px-1.5 py-0.2 rounded-full">{p.badge}</span>}
-                  <span className="text-[11px] font-bold">{p.name}</span>
-                  <span className="text-xs font-black text-amber-400 mt-0.5">{p.price}</span>
-                </button>
-              ))}
-            </div>
-            
-            <div className="flex flex-col gap-3 relative z-10">
-              {checkoutError && (
-                <div className="bg-red-950/40 text-red-400 text-xs py-2 px-3 rounded-lg border border-red-900/50 flex items-center justify-center gap-1.5">
-                  <AlertCircle className="w-4 h-4" /> {checkoutError}
-                </div>
-              )}
-              
-              <button 
-                onClick={() => handlePayment(selectedPlan)} 
-                disabled={isCheckoutLoading}
-                className="w-full py-3.5 bg-gradient-to-r from-amber-500 to-amber-400 text-slate-950 font-black rounded-xl shadow-[0_0_20px_rgba(245,158,11,0.3)] hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-2 text-sm uppercase tracking-wider"
-              >
-                {isCheckoutLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : `Assinar Plano ${selectedPlan}`}
-              </button>
-              <button onClick={() => setShowUpgradeModal(false)} className="text-xs font-bold text-slate-500 hover:text-white py-1 transition-colors">
-                Fechar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <CardPickerModal
+        isOpen={cardPickerConfig.isOpen}
+        onClose={() => setCardPickerConfig(prev => ({ ...prev, isOpen: false }))}
+        selectedCards={[...heroHand, ...board]}
+        usedCards={[...heroHand, ...board]}
+        maxCards={cardPickerConfig.maxCards}
+        title={cardPickerConfig.title}
+        onSelectCard={(card) => {
+          if (cardPickerConfig.target === 'hero1') {
+            const updated = [...heroHand];
+            updated[0] = card;
+            setHeroHand(updated.filter(Boolean));
+          } else if (cardPickerConfig.target === 'hero2') {
+            const updated = [...heroHand];
+            updated[1] = card;
+            setHeroHand(updated.filter(Boolean));
+          } else if (cardPickerConfig.target === 'board' && cardPickerConfig.boardIndex !== undefined) {
+            const updated = [...board];
+            updated[cardPickerConfig.boardIndex] = card;
+            setBoard(updated);
+          }
+          setCardPickerConfig(prev => ({ ...prev, isOpen: false }));
+        }}
+      />
 
-      <CardPickerModal 
-        isOpen={pickerTarget !== null} 
-        onClose={() => setPickerTarget(null)} 
-        selectedCards={pickerTarget === 'hero' ? heroHand : boardCards} 
-        usedCards={pickerTarget === 'hero' ? boardCards : heroHand}
-        onSelectCard={(c) => { 
-          if (pickerTarget === 'hero') { 
-            if (heroHand.includes(c)) {
-              setHeroHand(heroHand.filter(x => x !== c)); 
-            } else { 
-              const u = [...heroHand, c]; 
-              setHeroHand(u); 
-              if (u.length === 2) setTimeout(() => setPickerTarget(null), 150); 
-            } 
-          } else { 
-            if (boardCards.includes(c)) {
-              setBoardCards(boardCards.filter(x => x !== c)); 
-            } else { 
-              const u = [...boardCards, c]; 
-              if (u.length <= 5) setBoardCards(u); 
-            } 
-          } 
-        }} 
-        maxCards={pickerTarget === 'hero' ? 2 : 5} 
-        title={pickerTarget === 'hero' ? "Cartas da Mão" : "Cartas da Mesa"} 
+      <RangeMatrixModal
+        isOpen={isRangeMatrixOpen}
+        onClose={() => setIsRangeMatrixOpen(false)}
+        heroCards={heroHand}
+        currentPosition={position}
       />
     </div>
   );
-};
-
-export default App;
+}
