@@ -23,10 +23,8 @@ import {
 } from 'lucide-react';
 
 export default function App() {
-  // --- ESTADOS DA APLICAÇÃO ---
   const [showProUpgradeModal, setShowProUpgradeModal] = useState<boolean>(false);
 
-  // Estados principais da mão de Poker
   const [heroHand, setHeroHand] = useState<string[]>(['As', 'Ah']);
   const [board, setBoard] = useState<string[]>([]);
   const [stage, setStage] = useState<Stage>('preflop');
@@ -35,7 +33,6 @@ export default function App() {
   const [villains, setVillains] = useState<number | null>(1);
   const [actionToHero, setActionToHero] = useState<ActionToHero>('unopened');
 
-  // Estados de Modais
   const [isCaptureOpen, setIsCaptureOpen] = useState<boolean>(false);
   const [isProcessingVision, setIsProcessingVision] = useState<boolean>(false);
   const [cardPickerConfig, setCardPickerConfig] = useState<{
@@ -52,10 +49,8 @@ export default function App() {
   });
   const [isRangeMatrixOpen, setIsRangeMatrixOpen] = useState<boolean>(false);
 
-  // Decisão GTO Calculada
   const [decision, setDecision] = useState<PokerDecision | null>(null);
 
-  // Recalcula a decisão GTO
   useEffect(() => {
     if (heroHand.length === 2) {
       const res = calculateDecision({
@@ -101,7 +96,6 @@ export default function App() {
     }, 1500);
   };
 
-  // Interceptador inteligente para o clique no board / recursos avançados
   const handleBoardSlotClick = (target: 'hero1' | 'hero2' | 'board', _boardIndex?: number) => {
     if (target === 'board') {
       setShowProUpgradeModal(true);
@@ -117,7 +111,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#06130d] text-slate-100 font-sans selection:bg-amber-400 selection:text-slate-950 pb-20">
-      {/* Top Header */}
       <header className="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-emerald-900/50 bg-[#081a12]/90 backdrop-blur sticky top-0 z-40">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-amber-300 to-amber-600 flex items-center justify-center font-black text-slate-950 shadow-lg shadow-amber-500/20">
@@ -154,9 +147,7 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main Content Area */}
       <main className="max-w-4xl mx-auto p-3 sm:p-5 flex flex-col gap-5">
-        {/* Banner Convidativo no Topo */}
         <div className="p-3.5 rounded-2xl bg-gradient-to-r from-emerald-950/80 via-[#0c2419] to-emerald-950/80 border border-emerald-600/40 flex items-center justify-between gap-3 shadow-lg">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-amber-400/20 border border-amber-400/40 flex items-center justify-center text-amber-400 shrink-0">
@@ -175,7 +166,6 @@ export default function App() {
           </button>
         </div>
 
-        {/* Scenario Quick Presets */}
         <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
           <span className="text-[10px] font-mono uppercase tracking-wider text-slate-400 shrink-0">
             Exemplos:
@@ -192,7 +182,6 @@ export default function App() {
           ))}
         </div>
 
-        {/* Table Cards View */}
         <TableCardsView
           heroHand={heroHand}
           board={board}
@@ -208,7 +197,6 @@ export default function App() {
           confidenceSummary="Modo de demonstração livre ativado. Toque nas cartas do Hero para testar diferentes combinações pré-flop."
         />
 
-        {/* Quick Chips Panel */}
         <QuickChipsPanel
           position={position}
           onPositionChange={setPosition}
@@ -222,11 +210,9 @@ export default function App() {
           onStageChange={setStage}
         />
 
-        {/* Decision GTO Display */}
         <DecisionDisplay decision={decision} />
       </main>
 
-      {/* --- MODAL DE CONVERSÃO / 3 DIAS PRO GRÁTIS (BLINDADO) --- */}
       {showProUpgradeModal && (
         <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in">
           <div className="w-full max-w-lg bg-gradient-to-b from-[#0c2419] to-[#06140e] border border-amber-400/60 rounded-3xl p-6 sm:p-7 shadow-2xl text-slate-100 flex flex-col gap-5 relative">
@@ -237,7 +223,6 @@ export default function App() {
               ✕
             </button>
 
-            {/* Cabeçalho */}
             <div className="flex items-center gap-3.5 pb-4 border-b border-emerald-800/60">
               <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-300 to-amber-500 text-slate-950 flex items-center justify-center font-black shadow-lg shadow-amber-500/20 shrink-0">
                 <Sparkles className="w-6 h-6" />
@@ -252,7 +237,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* Benefícios e Regras claras */}
             <div className="flex flex-col gap-2.5">
               <div className="flex items-start gap-3 text-xs sm:text-sm text-slate-200 bg-emerald-950/60 p-3.5 rounded-2xl border border-amber-400/30">
                 <Gift className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
@@ -271,7 +255,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* CTA Principal */}
             <div className="flex flex-col gap-3 pt-2">
               <button
                 onClick={() => {
@@ -295,7 +278,6 @@ export default function App() {
         </div>
       )}
 
-      {/* --- MODAIS DO SISTEMA --- */}
       <CaptureModal
         isOpen={isCaptureOpen}
         onClose={() => setIsCaptureOpen(false)}
@@ -324,7 +306,7 @@ export default function App() {
             updated[1] = card;
             setHeroHand(updated.filter(Boolean));
           }
-          setCardPickerConfig(prev => ({ ...prev, isOpen: false }));
+          setCardPickerCard(prev => ({ ...prev, isOpen: false }));
         }}
       />
 
