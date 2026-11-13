@@ -15,23 +15,17 @@ import { TableCardsView } from './components/TableCardsView';
 import { DecisionDisplay } from './components/DecisionDisplay';
 import { 
   Camera, 
-  Zap, 
-  ShieldCheck, 
   ArrowRight, 
-  LogOut, 
-  Lock, 
   Grid, 
   Sparkles,
   Gift,
+  ShieldCheck,
   CheckCircle
 } from 'lucide-react';
 
 export default function App() {
   // --- ESTADOS DA APLICAÇÃO ---
-  // isAuthenticated agora começa como TRUE para o usuário entrar direto no app (modo free normal)
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(true);
-  
-  // Controla o modal de conversão/cadastro que aparece ao tentar interagir com recursos avançados (como o board)
   const [showProUpgradeModal, setShowProUpgradeModal] = useState<boolean>(false);
 
   // Estados principais da mão de Poker
@@ -109,15 +103,13 @@ export default function App() {
     }, 1500);
   };
 
-  // Interceptador para o clique no board (Gera a conversão amigável PRO)
-  const handleBoardSlotClick = (target: 'hero1' | 'hero2' | 'board', boardIndex?: number) => {
+  // Interceptador inteligente para o clique no board / recursos avançados
+  const handleBoardSlotClick = (target: 'hero1' | 'hero2' | 'board', _boardIndex?: number) => {
     if (target === 'board') {
-      // Exibe o modal convidando a criar a conta e ganhar 3 dias PRO grátis
       setShowProUpgradeModal(true);
       return;
     }
 
-    // Se for o Hero, abre o seletor normal no modo Free
     if (target === 'hero1') {
       setCardPickerConfig({ isOpen: true, title: 'Selecione a 1ª Carta do Hero', maxCards: 2, target: 'hero1' });
     } else if (target === 'hero2') {
@@ -166,7 +158,7 @@ export default function App() {
 
       {/* Main Content Area */}
       <main className="max-w-4xl mx-auto p-3 sm:p-5 flex flex-col gap-5">
-        {/* Banner Informativo convidativo no topo do App */}
+        {/* Banner Convidativo no Topo */}
         <div className="p-3.5 rounded-2xl bg-gradient-to-r from-emerald-950/80 via-[#0c2419] to-emerald-950/80 border border-emerald-600/40 flex items-center justify-between gap-3 shadow-lg">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-amber-400/20 border border-amber-400/40 flex items-center justify-center text-amber-400 shrink-0">
@@ -208,10 +200,9 @@ export default function App() {
           board={board}
           stage={stage}
           onCardSlotClick={handleBoardSlotClick}
-          onRemoveCard={(target, index) => {
+          onRemoveCard={(target, _index) => {
             if (target === 'hero') {
               const updated = [...heroHand];
-              updated[index] = '';
               setHeroHand(updated.filter(Boolean));
             } else if (target === 'board') {
               setShowProUpgradeModal(true);
@@ -238,59 +229,69 @@ export default function App() {
         <DecisionDisplay decision={decision} />
       </main>
 
-      {/* --- MODAL DE CONVERSÃO / 3 DIAS PRO GRÁTIS --- */}
+      {/* --- MODAL DE CONVERSÃO / 3 DIAS PRO GRÁTIS (OTIMIZADO) --- */}
       {showProUpgradeModal && (
         <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in">
-          <div className="w-full max-w-lg bg-gradient-to-b from-[#0c2419] to-[#06140e] border border-amber-400/50 rounded-3xl p-6 shadow-2xl text-slate-100 flex flex-col gap-5 relative">
+          <div className="w-full max-w-lg bg-gradient-to-b from-[#0c2419] to-[#06140e] border border-amber-400/60 rounded-3xl p-6 sm:p-7 shadow-2xl text-slate-100 flex flex-col gap-5 relative">
             <button 
               onClick={() => setShowProUpgradeModal(false)}
-              className="absolute top-4 right-4 text-slate-400 hover:text-white font-bold w-8 h-8 rounded-full bg-black/40 flex items-center justify-center cursor-pointer"
+              className="absolute top-4 right-4 text-slate-400 hover:text-white font-bold w-8 h-8 rounded-full bg-black/40 flex items-center justify-center cursor-pointer transition-colors"
             >
               ✕
             </button>
 
-            <div className="flex items-center gap-3 pb-3 border-b border-emerald-800/60">
-              <div className="w-10 h-10 rounded-2xl bg-amber-400 text-slate-950 flex items-center justify-center font-black shadow-lg">
-                <Sparkles className="w-5 h-5" />
+            {/* Cabeçalho */}
+            <div className="flex items-center gap-3.5 pb-4 border-b border-emerald-800/60">
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-300 to-amber-500 text-slate-950 flex items-center justify-center font-black shadow-lg shadow-amber-500/20 shrink-0">
+                <Sparkles className="w-6 h-6" />
               </div>
               <div>
-                <h3 className="text-base sm:text-lg font-bold text-amber-300 font-serif">Desbloqueie o Flop, Turn e River com IA</h3>
-                <p className="text-xs text-emerald-300/80">Crie sua conta gratuita em segundos e ganhe benefícios exclusivos</p>
+                <span className="text-[10px] font-mono font-bold tracking-widest text-amber-400 uppercase bg-amber-400/10 px-2 py-0.5 rounded border border-amber-400/20">
+                  Acesso Antecipado
+                </span>
+                <h3 className="text-lg sm:text-xl font-bold text-white font-serif mt-1">
+                  Desbloqueie o Flop, Turn e River com IA
+                </h3>
               </div>
             </div>
 
-            <div className="flex flex-col gap-3">
-              <div className="flex items-start gap-2.5 text-xs text-slate-200 bg-black/30 p-3 rounded-2xl border border-white/5">
-                <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                <span><strong>Cadastro 100% Gratuito:</strong> Sem cobrança antecipada para criar sua conta.</span>
+            {/* Benefícios de Alto Impacto */}
+            <div className="flex flex-col gap-2.5">
+              <div className="flex items-start gap-3 text-xs sm:text-sm text-slate-200 bg-emerald-950/60 p-3.5 rounded-2xl border border-amber-400/30">
+                <Gift className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                <div>
+                  <strong className="text-amber-300 block mb-0.5">3 Dias de Acesso PRO 100% Gratuito</strong>
+                  <span className="text-slate-300 text-xs">Teste a IA de reconhecimento por câmera e análise de mesa inteira sem limitações.</span>
+                </div>
               </div>
-              <div className="flex items-start gap-2.5 text-xs text-slate-200 bg-emerald-950/50 p-3 rounded-2xl border border-amber-400/30">
-                <Gift className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                <span><strong>3 Dias de Acesso PRO Completo:</strong> Teste o reconhecimento por câmera e análise de mesa inteira por 3 dias sem compromisso.</span>
-              </div>
-              <div className="flex items-start gap-2.5 text-xs text-slate-200 bg-black/30 p-3 rounded-2xl border border-white/5">
-                <ShieldCheck className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                <span><strong>Assinatura flexível:</strong> Se optar por um plano PRO, a cobrança pelo Mercado Pago só começa a contar <strong>após o término dos 3 dias grátis</strong>.</span>
+
+              <div className="flex items-start gap-3 text-xs sm:text-sm text-slate-200 bg-black/40 p-3.5 rounded-2xl border border-white/5">
+                <ShieldCheck className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+                <div>
+                  <strong className="text-white block mb-0.5">Zero Risco: Garantia de Teste</strong>
+                  <span className="text-slate-400 text-xs">Nenhuma cobrança agora. Se optar por continuar após os 3 dias, o plano PRO só começa a faturar no 4º dia. Cancele quando quiser com 1 clique.</span>
+                </div>
               </div>
             </div>
 
-            <div className="flex flex-col gap-2.5 pt-2">
+            {/* CTA Principal */}
+            <div className="flex flex-col gap-3 pt-2">
               <button
                 onClick={() => {
-                  // Aqui você pode disparar a criação de conta via Firebase Auth
-                  alert('Redirecionando para cadastro gratuito com 3 dias PRO...');
+                  alert('Redirecionando para ativação dos 3 dias PRO grátis...');
                   setShowProUpgradeModal(false);
                 }}
-                className="w-full py-4 rounded-xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-black text-sm uppercase tracking-wider shadow-lg shadow-amber-500/30 flex items-center justify-center gap-2 transition-all cursor-pointer"
+                className="w-full py-4 rounded-2xl bg-gradient-to-r from-amber-400 via-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-black text-sm uppercase tracking-wider shadow-xl shadow-amber-500/25 flex items-center justify-center gap-2 transition-all cursor-pointer transform hover:scale-[1.01]"
               >
-                <span>Criar Conta Grátis (Garantir 3 Dias PRO)</span>
-                <ArrowRight className="w-4 h-4" />
+                <span>Ativar Meus 3 Dias PRO Grátis</span>
+                <ArrowRight className="w-5 h-5" />
               </button>
+
               <button
                 onClick={() => setShowProUpgradeModal(false)}
-                className="text-xs text-slate-400 hover:text-slate-200 text-center py-1 cursor-pointer underline"
+                className="text-xs text-slate-400 hover:text-slate-200 text-center py-1.5 cursor-pointer transition-colors"
               >
-                Continuar testando apenas no Pré-Flop (Modo Free)
+                Continuar apenas no modo Pré-Flop (Grátis)
               </button>
             </div>
           </div>
