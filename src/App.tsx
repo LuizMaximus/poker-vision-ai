@@ -10,6 +10,7 @@ import { signInWithEmailAndPassword, createUserWithEmailAndPassword, sendEmailVe
 export const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [showFreeApp, setShowFreeApp] = useState(false);
   const [showLoginScreen, setShowLoginScreen] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [email, setEmail] = useState('');
@@ -202,12 +203,22 @@ export const App: React.FC = () => {
         return;
       }
       setIsCalculating(true);
-      const result = await fetchFastDecision({ heroHand, board: boardCards, position, stackDepth, actionToHero, gameMode }, user);
+      const result = await fetchFastDecision({ heroHand, board: boardCards, position, stackDepth, actionToHero, gameMode }, boardCards.length ? user ?? undefined : undefined);
       if (isMounted) { setDecision(result); setIsCalculating(false); }
     };
     getDecision();
     return () => { isMounted = false; };
-  }, [heroHand, boardCards, position, stackDepth, actionToHero, gameMode, user, emailVerified]);
+  }, [heroHand, boardCards, position, stackDepth, actionToHero, gameMode, user, emailVerified, showFreeApp, showLoginScreen]);
+
+  const openPro = () => {
+    if (user) {
+      setShowUpgradeModal(true);
+      return;
+    }
+    setAuthMode('register');
+    setAuthError('');
+    setShowLoginScreen(true);
+  };
 
   const resetTable = () => { setHeroHand([]); setBoardCards([]); setActionToHero('unopened'); };
   const handlePositionChange = (pos: TablePosition) => { setPosition(pos); if (pos === 'BB' && actionToHero === 'unopened') setActionToHero('limp'); };
@@ -244,7 +255,7 @@ export const App: React.FC = () => {
 
           <div className="w-full max-w-md bg-[#0c2419]/90 backdrop-blur-xl border border-emerald-800/50 rounded-3xl p-8 shadow-2xl z-10">
             <div className="flex justify-between items-center mb-6">
-              <button onClick={() => setShowLoginScreen(false)} className="text-xs text-emerald-400 hover:text-white font-bold flex items-center gap-1">← Voltar à Apresentação</button>
+              <button onClick={() => setShowLoginScreen(false)} className="text-xs text-emerald-400 hover:text-white font-bold flex items-center gap-1">← {showFreeApp ? 'Voltar ao app' : 'Voltar à apresentação'}</button>
               <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400/20 to-amber-600/10 border border-amber-400/50 flex items-center justify-center"><Zap className="w-5 h-5 text-amber-400" /></div>
             </div>
 
@@ -372,12 +383,12 @@ export const App: React.FC = () => {
           </h1>
 
           <p className="max-w-2xl mx-auto text-base sm:text-lg text-slate-300 mb-10 leading-relaxed font-normal">
-            Estude mãos de Texas Hold’em no celular. Confirme seu e-mail e ganhe 3 dias de PRO no primeiro teste, sem cartão, para analisar pré-flop e pós-flop. Depois, continue no pré-flop grátis ou escolha um plano PRO.
+            Analise o pré-flop grátis, sem cadastro. Confirme seu e-mail e ganhe 3 dias de PRO no primeiro teste, sem cartão, para analisar pré-flop e pós-flop. Depois, continue no pré-flop grátis ou escolha um plano PRO.
           </p>
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 max-w-md mx-auto mb-16">
             <button
-              onClick={() => { setAuthMode('register'); setShowLoginScreen(true); }}
+              onClick={() => { setShowFreeApp(true); window.scrollTo(0, 0); }}
               className="w-full sm:w-auto px-8 py-4 bg-gradient-to-r from-amber-500 to-amber-400 text-slate-950 font-black rounded-2xl shadow-[0_0_30px_rgba(245,158,11,0.4)] hover:scale-105 active:scale-95 transition-all text-sm uppercase tracking-wider flex items-center justify-center gap-2"
             >
               Começar Grátis Agora <ArrowRight className="w-4 h-4" />
@@ -719,7 +730,7 @@ export const App: React.FC = () => {
                 POKER VISION {isProUser ? <Crown className="w-4 h-4 text-amber-400 drop-shadow-[0_0_5px_rgba(251,191,36,0.8)]" /> : <span className="px-1.5 py-0.5 bg-slate-800 border border-slate-700 text-[9px] rounded text-slate-400 font-bold">FREE</span>}
               </h1>
               <div className="flex items-center gap-2 mt-0.5">
-                <span className="text-[10px] text-emerald-400/70 font-medium truncate max-w-[130px] block">{user.email}</span>
+                <span className="text-[10px] text-emerald-400/70 font-medium truncate max-w-[130px] block">{user?.email ?? 'Modo visitante'}</span>
                 {isProUser && daysRemaining !== null && (
                   <span className="text-[9px] bg-amber-500/20 text-amber-400 px-1.5 py-0.2 rounded border border-amber-500/30 font-bold flex items-center gap-1">
                     <Clock className="w-2.5 h-2.5" /> {access?.plan === 'trial' ? 'Teste PRO · ' : ''}{daysRemaining}d restantes
@@ -730,12 +741,12 @@ export const App: React.FC = () => {
           </div>
           <div className="flex gap-2">
             {!isProUser && (
-              <button onClick={() => setShowUpgradeModal(true)} className="px-3 py-1.5 bg-gradient-to-r from-amber-500 to-amber-400 text-slate-950 font-black text-xs rounded-xl shadow-md flex items-center gap-1">
+              <button onClick={openPro} className="px-3 py-1.5 bg-gradient-to-r from-amber-500 to-amber-400 text-slate-950 font-black text-xs rounded-xl shadow-md flex items-center gap-1">
                 <Crown className="w-3.5 h-3.5" /> PRO
               </button>
             )}
             <button onClick={resetTable} className="p-2 rounded-xl bg-emerald-950/50 border border-emerald-800 text-emerald-400 hover:bg-emerald-900 hover:text-white active:scale-90 transition-all"><RotateCcw className="w-4 h-4" /></button>
-            <button onClick={() => signOut(auth)} className="p-2 rounded-xl bg-red-950/30 border border-red-900/40 text-red-400 hover:bg-red-900/60 hover:text-white active:scale-90 transition-all"><LogOut className="w-4 h-4" /></button>
+            {user ? <button aria-label="Sair da conta" onClick={() => { setShowLoginScreen(false); void signOut(auth); }} className="p-2 rounded-xl bg-red-950/30 border border-red-900/40 text-red-400 hover:bg-red-900/60 hover:text-white active:scale-90 transition-all"><LogOut className="w-4 h-4" /></button> : <button type="button" onClick={() => { setAuthMode('login'); setShowLoginScreen(true); }} className="text-xs font-bold text-emerald-300">Entrar</button>}
           </div>
         </div>
         <div className="flex p-1 bg-black/40 rounded-xl border border-emerald-900/40 shadow-inner">
@@ -763,7 +774,7 @@ export const App: React.FC = () => {
             <span className="text-[11px] font-bold text-amber-400/80 uppercase tracking-widest">2. Board (Pós-Flop)</span>
             {!isProUser && <span className="bg-amber-500/20 text-amber-400 text-[9px] px-2 py-0.5 rounded border border-amber-500/30 font-bold flex gap-1 items-center shadow-[0_0_8px_rgba(245,158,11,0.2)]"><Lock className="w-3 h-3" /> PRO</span>}
           </div>
-          <div onClick={() => { if (!access) return; if (!isProUser) { setShowUpgradeModal(true); return; } setPickerTarget('board'); }} className={`flex justify-center gap-1.5 p-4 rounded-xl border border-dashed cursor-pointer transition-all ${isProUser ? 'bg-[#05140e] border-emerald-800/80 hover:bg-emerald-950/30 group' : 'bg-[#020806]/80 border-emerald-900/50 blur-[3px] scale-[0.98]'}`}>
+          <div onClick={() => { if (user && !access) return; if (!isProUser) { openPro(); return; } setPickerTarget('board'); }} className={`flex justify-center gap-1.5 p-4 rounded-xl border border-dashed cursor-pointer transition-all ${isProUser ? 'bg-[#05140e] border-emerald-800/80 hover:bg-emerald-950/30 group' : 'bg-[#020806]/80 border-emerald-900/50 blur-[3px] scale-[0.98]'}`}>
             {[1, 2, 3, 4, 5].map((_, i) => {
               const c = boardCards[i];
               return c ? (
@@ -776,7 +787,7 @@ export const App: React.FC = () => {
           </div>
           {!isProUser && (
             <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/50 backdrop-blur-[1px]">
-              <button onClick={() => setShowUpgradeModal(true)} className="bg-gradient-to-r from-amber-500 to-amber-400 text-slate-950 text-xs font-black px-5 py-2.5 rounded-full flex items-center gap-2 shadow-[0_0_15px_rgba(245,158,11,0.4)] hover:scale-105 active:scale-95 transition-all">
+              <button onClick={openPro} className="bg-gradient-to-r from-amber-500 to-amber-400 text-slate-950 text-xs font-black px-5 py-2.5 rounded-full flex items-center gap-2 shadow-[0_0_15px_rgba(245,158,11,0.4)] hover:scale-105 active:scale-95 transition-all">
                 <Lock className="w-3.5 h-3.5" /> Desbloquear Board
               </button>
             </div>

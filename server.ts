@@ -181,10 +181,10 @@ app.post('/api/poker/calculate', async (req: Request, res: Response) => {
         !['CASH', 'MTT', 'SPIN'].includes(gameMode)) {
       return res.status(400).json({ error: 'Confira as cartas e as opções da mão.' });
     }
-    const user = await authenticatedUser(req);
-    if (!user) return res.sendStatus(401);
-    if (!user.email_verified) return res.status(403).json({ error: 'Confirme seu e-mail antes de analisar uma mão.' });
     if (board.length) {
+      const user = await authenticatedUser(req);
+      if (!user) return res.sendStatus(401);
+      if (!user.email_verified) return res.status(403).json({ error: 'Confirme seu e-mail antes de analisar o pós-flop.' });
       const access = await proAccess(user);
       if (access.plan !== 'paid' && access.plan !== 'trial') return res.status(403).json({ error: 'O pós-flop está disponível durante o teste ou com um plano PRO.' });
       const stage: Stage = board.length === 3 ? 'flop' : board.length === 4 ? 'turn' : 'river';
