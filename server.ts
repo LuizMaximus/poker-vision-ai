@@ -43,7 +43,8 @@ async function authenticatedUser(req: Request) {
   if (!token) return null;
   try {
     return await auth.verifyIdToken(token);
-  } catch {
+  } catch (error) {
+    console.warn('Firebase ID token verification failed', { code: (error as { code?: unknown })?.code });
     return null;
   }
 }
@@ -78,7 +79,8 @@ app.post('/api/account/access', async (req: Request, res: Response) => {
   if (!user) return res.sendStatus(401);
   try {
     return res.json(await proAccess(user));
-  } catch {
+  } catch (error) {
+    console.error('Firebase PRO access lookup failed', { code: (error as { code?: unknown })?.code });
     return res.sendStatus(503);
   }
 });
