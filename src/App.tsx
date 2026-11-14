@@ -5,7 +5,7 @@ import { CardPickerModal } from './components/CardPickerModal';
 import { DecisionDisplay } from './components/DecisionDisplay';
 import { Zap, RotateCcw, Swords, Coins, Trophy, Lock, Crown, LogOut, Mail, KeyRound, Loader2, AlertCircle, Clock, ShieldCheck, Sparkles, CheckCircle2, MessageSquare, Menu, X, FileText, ChevronDown, ArrowRight } from 'lucide-react';
 import { auth, googleProvider } from './firebase';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithPopup, onAuthStateChanged, signOut, User } from 'firebase/auth';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, sendEmailVerification, reload, signInWithPopup, onAuthStateChanged, signOut, User } from 'firebase/auth';
 
 export const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -16,9 +16,12 @@ export const App: React.FC = () => {
   const [password, setPassword] = useState('');
   const [authError, setAuthError] = useState('');
 
-  const [access, setAccess] = useState<{plan: 'free' | 'trial' | 'paid'; endsAt: number | null} | null>(null);
+  const [emailVerified, setEmailVerified] = useState(false);
+  const [verificationMessage, setVerificationMessage] = useState('');
+  const [verificationBusy, setVerificationBusy] = useState(false);
+  const [access, setAccess] = useState<{plan: 'free' | 'trial' | 'paid' | 'unverified'; endsAt: number | null} | null>(null);
   const [accessError, setAccessError] = useState(false);
-  const isProUser = access !== null && access.plan !== 'free';
+  const isProUser = access?.plan === 'trial' || access?.plan === 'paid';
   const daysRemaining = access?.endsAt ? Math.max(1, Math.ceil((access.endsAt - Date.now()) / 86400000)) : null;
   const [selectedPlan, setSelectedPlan] = useState<'mensal' | 'semestral' | 'anual'>('mensal');
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
@@ -57,6 +60,7 @@ export const App: React.FC = () => {
 
   useEffect(() => onAuthStateChanged(auth, (currentUser) => {
     setUser(currentUser);
+    setEmailVerified(currentUser?.emailVerified === true);
     setAccess(null);
     setAccessError(false);
     setBoardCards([]);
@@ -65,12 +69,13 @@ export const App: React.FC = () => {
   }), []);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || !emailVerified) return;
     let active = true;
     let expiry: ReturnType<typeof setTimeout>;
     const refresh = async () => {
       try {
         const response = await fetch('/api/account/access', {
+          method: 'POST',
           headers: { Authorization: 'Bearer ' + await user.getIdToken() },
         });
         if (!response.ok) throw new Error('Falha ao consultar plano');
@@ -98,14 +103,17 @@ export const App: React.FC = () => {
       clearInterval(interval);
       clearTimeout(expiry);
     };
-  }, [user]);
+  }, [user, emailVerified]);
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError('');
     try {
       if (authMode === 'login') await signInWithEmailAndPassword(auth, email, password);
-      else await createUserWithEmailAndPassword(auth, email, password);
+      else {
+        const { user: account } = await createUserWithEmailAndPassword(auth, email.trim(), password);
+        await sendVerification(account);
+      }
     } catch (err: any) {
       const errors: Record<string, string> = {
         'auth/invalid-credential': 'Dados incorretos. Tente novamente.',
@@ -114,6 +122,36 @@ export const App: React.FC = () => {
         'auth/network-request-failed': 'Falha de conexão. Tente novamente.',
       };
       setAuthError(errors[err.code] ?? 'Erro ao autenticar. Tente novamente.');
+    }
+  };
+
+  const sendVerification = async (account: User) => {
+    setVerificationBusy(true);
+    try {
+      auth.languageCode = 'pt-BR';
+      await sendEmailVerification(account);
+      setVerificationMessage('Link enviado. Confira a caixa de entrada e o spam.');
+    } catch {
+      setVerificationMessage('Não foi possível enviar agora. Aguarde um pouco e tente novamente.');
+    } finally {
+      setVerificationBusy(false);
+    }
+  };
+
+  const checkVerification = async (account: User) => {
+    setVerificationBusy(true);
+    try {
+      await reload(account);
+      if (!account.emailVerified) {
+        setVerificationMessage('O e-mail ainda não foi confirmado. Abra o link que enviamos.');
+        return;
+      }
+      await account.getIdToken(true);
+      if (auth.currentUser?.uid === account.uid) setEmailVerified(true);
+    } catch {
+      setVerificationMessage('Não foi possível consultar a confirmação. Tente novamente.');
+    } finally {
+      setVerificationBusy(false);
     }
   };
 
@@ -164,18 +202,35 @@ export const App: React.FC = () => {
         return;
       }
       setIsCalculating(true);
-      const result = await fetchFastDecision({ heroHand, board: boardCards, position, stackDepth, actionToHero, gameMode }, boardCards.length ? user : undefined);
+      const result = await fetchFastDecision({ heroHand, board: boardCards, position, stackDepth, actionToHero, gameMode }, user);
       if (isMounted) { setDecision(result); setIsCalculating(false); }
     };
     getDecision();
     return () => { isMounted = false; };
-  }, [heroHand, boardCards, position, stackDepth, actionToHero, gameMode, user]);
+  }, [heroHand, boardCards, position, stackDepth, actionToHero, gameMode, user, emailVerified]);
 
   const resetTable = () => { setHeroHand([]); setBoardCards([]); setActionToHero('unopened'); };
   const handlePositionChange = (pos: TablePosition) => { setPosition(pos); if (pos === 'BB' && actionToHero === 'unopened') setActionToHero('limp'); };
   const handleActionChange = (act: 'unopened' | 'limp' | 'raise' | '3bet') => { setActionToHero(act); if (act === 'unopened' && position === 'BB') setPosition('SB'); };
   const handleModeChange = (mode: GameMode) => { setGameMode(mode); setHeroHand([]); setBoardCards([]); if (mode === 'SPIN') { setPosition('BTN'); setStackDepth('low'); } else if (mode === 'CASH') { setPosition('BTN'); setStackDepth('deep'); } else { setPosition('BTN'); setStackDepth('medium'); } };
   const activePositions: TablePosition[] = gameMode === 'SPIN' ? ['BTN', 'SB', 'BB'] : ['UTG', 'MP', 'CO', 'BTN', 'SB', 'BB'];
+
+  if (user && !emailVerified) {
+    return (
+      <main className="min-h-screen grid place-items-center bg-[#020806] p-5 text-slate-100">
+        <section className="w-full max-w-md rounded-2xl border border-emerald-800 bg-[#05140e] p-6">
+          <h1 className="text-xl font-bold text-amber-300">Confirme seu e-mail</h1>
+          <p className="mt-3 text-sm">Abra o link enviado para {user.email} para ativar sua conta e receber os 3 dias de PRO, se elegível.</p>
+          <p role="status" className="my-3 text-sm text-emerald-200">{verificationMessage}</p>
+          <div className="flex flex-wrap gap-3">
+            <button disabled={verificationBusy} onClick={() => void checkVerification(user)} className="rounded-lg bg-amber-400 px-3 py-2 font-bold text-black">Já confirmei</button>
+            <button disabled={verificationBusy} onClick={() => void sendVerification(user)} className="rounded-lg border border-emerald-800 px-3 py-2">Reenviar link</button>
+            <button disabled={verificationBusy} onClick={() => void signOut(auth)} className="px-3 py-2">Trocar de conta</button>
+          </div>
+        </section>
+      </main>
+    );
+  }
 
   if (isAuthLoading) return <div className="min-h-screen bg-slate-950 flex items-center justify-center"><Zap className="w-10 h-10 text-amber-400 animate-pulse drop-shadow-[0_0_15px_rgba(251,191,36,0.6)]" /></div>;
 
@@ -196,7 +251,7 @@ export const App: React.FC = () => {
             <h1 className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-amber-200 to-amber-500 text-center font-serif mb-1 tracking-tight">POKER VISION AI</h1>
             <p className="text-xs text-emerald-400/80 text-center mb-6 font-medium">Seu assistente de estratégia de poker</p>
 
-            {authMode === 'register' && <p className="mb-4 text-center text-xs text-emerald-200">3 dias de PRO após criar a conta. Sem cartão e sem cobrança automática.</p>}
+            {authMode === 'register' && <p className="mb-4 text-center text-xs text-emerald-200">3 dias de PRO após confirmar o e-mail, para caixas que ainda não usaram o teste. Sem cartão e sem cobrança automática.</p>}
             {authError && <div className="mb-4 bg-red-950/50 border border-red-900/50 text-red-400 text-xs font-bold text-center py-2 rounded-lg flex items-center justify-center gap-1.5"><AlertCircle className="w-3.5 h-3.5" />{authError}</div>}
 
             <form onSubmit={handleAuth} className="flex flex-col gap-4">
@@ -317,7 +372,7 @@ export const App: React.FC = () => {
           </h1>
 
           <p className="max-w-2xl mx-auto text-base sm:text-lg text-slate-300 mb-10 leading-relaxed font-normal">
-            Estude mãos de Texas Hold’em no celular. Crie uma conta e ganhe 3 dias de PRO, sem cartão, para analisar pré-flop e pós-flop. Depois, continue no pré-flop grátis ou escolha um plano PRO.
+            Estude mãos de Texas Hold’em no celular. Confirme seu e-mail e ganhe 3 dias de PRO no primeiro teste, sem cartão, para analisar pré-flop e pós-flop. Depois, continue no pré-flop grátis ou escolha um plano PRO.
           </p>
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 max-w-md mx-auto mb-16">

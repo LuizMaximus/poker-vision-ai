@@ -33,7 +33,8 @@ export async function fetchFastDecision(input: FastDecisionInput, user?: { getId
 
     if (!response.ok) {
       if (response.status === 403) {
-        return { action: 'PRO', sizing: '-', rationale: 'O pós-flop está disponível durante o teste ou com um plano PRO.' };
+        const { error } = await response.json();
+        return { action: 'AGUARDANDO', sizing: '-', rationale: error };
       }
       throw new Error('Falha de permissão ou servidor.');
     }

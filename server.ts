@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import express, { Request, Response } from 'express';
 import dotenv from 'dotenv';
 import path from 'path';
@@ -8,7 +9,7 @@ import { applicationDefault, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
 import { calculateDecision, normalizeCard } from './src/utils/pokerHeuristics';
-import { resolveAccess } from './accountAccess';
+import { resolveAccess, trialEmailKey } from './accountAccess';
 import type { Stage } from './src/utils/pokerTypes';
 
 dotenv.config({ path: '.env.local' });
@@ -47,13 +48,31 @@ async function authenticatedUser(req: Request) {
   }
 }
 
-async function proAccess(user: { uid: string; email?: string }) {
-  const account = await auth.getUser(user.uid);
-  const profile = user.email ? (await db.collection('users').doc(user.email).get()).data() : undefined;
-  return resolveAccess(account.metadata.creationTime, profile);
+async function proAccess(user: { uid: string; email?: string; email_verified?: boolean }) {
+  const email = user.email;
+  if (!email || !user.email_verified) return { plan: 'unverified', endsAt: null };
+
+  const profile = (await db.collection('users').doc(email).get()).data();
+  const paid = resolveAccess(null, profile);
+  if (paid.plan === 'paid') return paid;
+
+  const key = createHash('sha256').update(trialEmailKey(email)).digest('hex');
+  const mailbox = db.collection('trialMailboxes').doc(key);
+  const account = db.collection('trialAccounts').doc(user.uid);
+  const expiry = await db.runTransaction(async (tx) => {
+    const previous = (await tx.get(account)).data();
+    if (previous) return previous.mailbox === key ? Number(previous.endsAt) : null;
+    if ((await tx.get(mailbox)).exists) return null;
+
+    const endsAt = Date.now() + 3 * 86400000;
+    tx.create(account, { mailbox: key, endsAt });
+    tx.create(mailbox, { endsAt });
+    return endsAt;
+  });
+  return resolveAccess(expiry, profile);
 }
 
-app.get('/api/account/access', async (req: Request, res: Response) => {
+app.post('/api/account/access', async (req: Request, res: Response) => {
   res.set('Cache-Control', 'no-store');
   const user = await authenticatedUser(req);
   if (!user) return res.sendStatus(401);
@@ -65,8 +84,10 @@ app.get('/api/account/access', async (req: Request, res: Response) => {
 });
 
 app.post('/api/checkout', async (req: Request, res: Response) => {
-  const email = (await authenticatedUser(req))?.email;
+  const account = await authenticatedUser(req);
+  const email = account?.email;
   if (!email) return res.status(401).json({ error: 'Entre novamente para continuar.' });
+  if (!account?.email_verified) return res.status(403).json({ error: 'Confirme seu e-mail antes de assinar.' });
   const { planType } = req.body;
   const plan = getPlan(planType);
   if (!plan) return res.status(400).json({ error: 'Selecione um plano válido.' });
@@ -160,10 +181,12 @@ app.post('/api/poker/calculate', async (req: Request, res: Response) => {
         !['CASH', 'MTT', 'SPIN'].includes(gameMode)) {
       return res.status(400).json({ error: 'Confira as cartas e as opções da mão.' });
     }
+    const user = await authenticatedUser(req);
+    if (!user) return res.sendStatus(401);
+    if (!user.email_verified) return res.status(403).json({ error: 'Confirme seu e-mail antes de analisar uma mão.' });
     if (board.length) {
-      const user = await authenticatedUser(req);
-      if (!user) return res.sendStatus(401);
-      if ((await proAccess(user)).plan === 'free') return res.status(403).json({ error: 'O pós-flop está disponível durante o teste ou com um plano PRO.' });
+      const access = await proAccess(user);
+      if (access.plan !== 'paid' && access.plan !== 'trial') return res.status(403).json({ error: 'O pós-flop está disponível durante o teste ou com um plano PRO.' });
       const stage: Stage = board.length === 3 ? 'flop' : board.length === 4 ? 'turn' : 'river';
       const result = calculateDecision({
         heroCardsRaw: heroHand, boardCardsRaw: board, stage, position,
