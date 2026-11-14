@@ -194,7 +194,7 @@ export const App: React.FC = () => {
   };
 
   useEffect(() => {
-    if (!user) return;
+    if (user ? !emailVerified : !showFreeApp || showLoginScreen) return;
     let isMounted = true;
     const getDecision = async () => {
       if (heroHand.length < 2 || boardCards.length === 1 || boardCards.length === 2) {
@@ -246,7 +246,7 @@ export const App: React.FC = () => {
   if (isAuthLoading) return <div className="min-h-screen bg-slate-950 flex items-center justify-center"><Zap className="w-10 h-10 text-amber-400 animate-pulse drop-shadow-[0_0_15px_rgba(251,191,36,0.6)]" /></div>;
 
   // --- SE O UTILIZADOR NÃO ESTIVER LOGADO: EXIBE A LANDING PAGE OU TELA DE LOGIN ---
-  if (!user) {
+  if (!user && (!showFreeApp || showLoginScreen)) {
     if (showLoginScreen) {
       return (
         <div className="min-h-screen bg-[#020806] flex flex-col items-center justify-center p-4 select-none relative overflow-hidden">
