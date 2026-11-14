@@ -4,9 +4,13 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 import { MercadoPagoConfig, Preference, Payment } from 'mercadopago';
-import { initializeApp } from 'firebase/app';
-import { getFirestore, doc, setDoc } from 'firebase/firestore';
+import { applicationDefault, initializeApp } from 'firebase-admin/app';
+import { getAuth } from 'firebase-admin/auth';
+import { getFirestore } from 'firebase-admin/firestore';
+import { calculateDecision, normalizeCard } from './src/utils/pokerHeuristics';
+import type { Stage } from './src/utils/pokerTypes';
 
+dotenv.config({ path: '.env.local' });
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
@@ -17,100 +21,140 @@ const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 10000;
 
 app.use(express.json({ limit: '15mb' }));
 
-// --- CONFIGURAÇÕES ---
-const client = new MercadoPagoConfig({ accessToken: 'APP_USR-930320636272567-111012-ee53ca4a31a8da40aa76d650225c4cb4-280571635' });
-
-const firebaseConfig = {
-  apiKey: "AIzaSyAQSdhDE1j2A2VdLW9i2LvicpO_lUFKEbs",
-  authDomain: "poker-vision-ai.firebaseapp.com",
-  projectId: "poker-vision-ai",
-  storageBucket: "poker-vision-ai.firebasestorage.app",
-  messagingSenderId: "168580259823",
-  appId: "1:168580259823:web:fc7b9432b5ad12735b201a",
-  measurementId: "G-XH3NVL13DH"
-};
-const firebaseApp = initializeApp(firebaseConfig);
+const firebaseApp = initializeApp({ credential: applicationDefault(), projectId: 'poker-vision-ai' });
+const auth = getAuth(firebaseApp);
 const db = getFirestore(firebaseApp);
+const token = process.env.MERCADO_PAGO_ACCESS_TOKEN;
+const paymentClient = token ? new MercadoPagoConfig({ accessToken: token }) : null;
+const plans = {
+  mensal: { name: 'Mensal', price: 29.90, days: 30 },
+  semestral: { name: 'Semestral', price: 149.90, days: 180 },
+  anual: { name: 'Anual', price: 249.90, days: 365 },
+};
 
-// --- ROTAS DE PAGAMENTO (MULTI-PLANOS) ---
-app.post('/api/checkout', async (req: Request, res: Response) => {
+function getPlan(key: unknown) {
+  return typeof key === 'string' && Object.hasOwn(plans, key) ? plans[key as keyof typeof plans] : undefined;
+}
+
+async function authenticatedEmail(req: Request) {
+  const token = req.get('authorization')?.match(/^Bearer (\S+)$/i)?.[1];
+  if (!token) return null;
   try {
-    // Agora recebemos o e-mail do utilizador logado no site
-    const { planType, email } = req.body; 
-    const host = req.get('host');
-    const protocol = req.headers['x-forwarded-proto'] || req.protocol;
-    const baseUrl = `${protocol}://${host}`;
-    
-    let title = 'Poker Vision AI - Acesso PRO (Mensal)';
-    let price = 29.90;
-    let daysToAdd = 30;
+    return (await auth.verifyIdToken(token)).email ?? null;
+  } catch {
+    return null;
+  }
+}
 
-    if (planType === 'semestral') {
-      title = 'Poker Vision AI - Acesso PRO (Semestral)';
-      price = 149.90;
-      daysToAdd = 180;
-    } else if (planType === 'anual') {
-      title = 'Poker Vision AI - Acesso PRO (Anual)';
-      price = 249.90;
-      daysToAdd = 365;
-    }
+app.post('/api/checkout', async (req: Request, res: Response) => {
+  const email = await authenticatedEmail(req);
+  if (!email) return res.status(401).json({ error: 'Entre novamente para continuar.' });
+  const { planType } = req.body;
+  const plan = getPlan(planType);
+  if (!plan) return res.status(400).json({ error: 'Selecione um plano válido.' });
+  const origin = process.env.PUBLIC_APP_URL;
+  if (!paymentClient || !origin) return res.status(503).json({ error: 'Checkout temporariamente indisponível.' });
 
-    const preference = new Preference(client);
-    const result = await preference.create({
+  try {
+    const backUrl = (status: string) => new URL('/?status=' + status, origin).href;
+    const result = await new Preference(paymentClient).create({
       body: {
-        items: [{ id: planType || 'mensal', title, quantity: 1, unit_price: price, currency_id: 'BRL' }],
-        back_urls: { success: `${baseUrl}?status=success`, failure: `${baseUrl}?status=failure`, pending: `${baseUrl}?status=pending` },
+        items: [{ id: planType, title: 'Poker Vision AI - PRO (' + plan.name + ')', quantity: 1, unit_price: plan.price, currency_id: 'BRL' }],
+        back_urls: { success: backUrl('success'), failure: backUrl('failure'), pending: backUrl('pending') },
+        notification_url: new URL('/api/webhook', origin).href,
         auto_return: 'approved',
-        // Enviamos o e-mail do App como metadado oculto para o MP devolver no webhook
-        metadata: { daysToAdd, user_email: email } 
-      }
+        metadata: { plan_type: planType, user_email: email },
+      },
     });
-
-    const initUrl = result.init_point || result.sandbox_init_point;
-    res.json({ init_point: initUrl });
-  } catch (error: any) {
-    console.error("Erro no Mercado Pago:", error);
-    res.status(500).json({ error: error.message });
+    const url = process.env.MERCADO_PAGO_SANDBOX === 'true' ? result.sandbox_init_point : result.init_point;
+    if (!url) return res.status(502).json({ error: 'O provedor não retornou o endereço do checkout.' });
+    return res.json({ init_point: url });
+  } catch {
+    return res.status(502).json({ error: 'Não foi possível iniciar o checkout. Tente novamente.' });
   }
 });
 
-// WEBHOOK
 app.post('/api/webhook', async (req: Request, res: Response) => {
+  const action = req.body.action ?? req.query.topic ?? req.body.type;
+  const paymentId = String(req.body.data?.id ?? req.query.id ?? '');
+  if (typeof action !== 'string' || (action !== 'payment' && !action.startsWith('payment.')) || !/^\d+$/.test(paymentId)) {
+    return res.sendStatus(200);
+  }
+  if (!paymentClient) return res.sendStatus(503);
   try {
-    const action = req.body.action || req.query.topic || req.body.type;
-    const paymentId = req.body.data?.id || req.query.id;
+    const payment = await new Payment(paymentClient).get({ id: paymentId });
+    const { plan_type, user_email } = payment.metadata ?? {};
+    const plan = getPlan(plan_type);
+    if (payment.status !== 'approved' || !plan || typeof user_email !== 'string' ||
+        payment.currency_id !== 'BRL' || payment.transaction_amount !== plan.price ||
+        payment.live_mode !== (process.env.MERCADO_PAGO_SANDBOX !== 'true')) return res.sendStatus(200);
 
-    if ((action === 'payment' || action?.includes('payment')) && paymentId) {
-      const paymentClient = new Payment(client);
-      const paymentData = await paymentClient.get({ id: paymentId as string });
+    const receipt = db.collection('processedPayments').doc(paymentId);
+    const profile = db.collection('users').doc(user_email);
+    await db.runTransaction(async (transaction) => {
+      if ((await transaction.get(receipt)).exists) return;
+      const current = (await transaction.get(profile)).data();
+      const currentExpiry = current?.isPro === true ? Date.parse(current.expiresAt ?? '') : NaN;
+      const approvedAt = Date.parse(payment.date_approved ?? '');
+      const startsAt = Math.max(currentExpiry || 0, approvedAt || Date.now());
+      transaction.set(profile, { isPro: true, expiresAt: new Date(startsAt + plan.days * 86400000).toISOString() }, { merge: true });
+      transaction.create(receipt, { processedAt: new Date().toISOString() });
+    });
+    return res.sendStatus(200);
+  } catch {
+    return res.sendStatus(500);
+  }
+});
 
-      if (paymentData.status === 'approved') {
-        // Resgata o e-mail exato do App (ou o do MP como backup)
-        const targetEmail = paymentData.metadata?.user_email || paymentData.payer?.email;
-        
-        let daysToAdd = 30;
-        const transactionAmount = paymentData.transaction_amount;
-        if (transactionAmount && transactionAmount >= 200) daysToAdd = 365;
-        else if (transactionAmount && transactionAmount >= 120) daysToAdd = 180;
+function parseCardList(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  const cards = value.map((item) => typeof item === 'string' ? normalizeCard(item) : null);
+  return cards.every((card): card is string => card !== null) ? cards : null;
+}
 
-        if (targetEmail) {
-          const expirationDate = new Date();
-          expirationDate.setDate(expirationDate.getDate() + daysToAdd);
-
-          // Salva no Firestore ativando a conta PRO
-          await setDoc(doc(db, 'users', targetEmail), { 
-            isPro: true, 
-            expiresAt: expirationDate.toISOString() 
-          }, { merge: true });
-          
-          console.log(`Sucesso: Utilizador ${targetEmail} promovido a PRO por ${daysToAdd} dias.`);
-        }
-      }
+app.post('/api/poker/analyze', async (req: Request, res: Response) => {
+  const email = await authenticatedEmail(req);
+  if (!email) return res.status(401).json({ error: 'Entre novamente para analisar uma imagem.' });
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) return res.status(503).json({ error: 'Análise de imagens temporariamente indisponível.' });
+  const image = typeof req.body.image === 'string' && req.body.image.match(/^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/]+=*)$/);
+  if (!image) return res.status(400).json({ error: 'Envie uma imagem JPEG, PNG ou WebP.' });
+  try {
+    const profile = (await db.collection('users').doc(email).get()).data();
+    if (profile?.isPro !== true || (profile.expiresAt && !(Date.parse(profile.expiresAt) > Date.now()))) {
+      return res.status(403).json({ error: 'A análise de imagens está disponível no plano PRO.' });
     }
-    res.status(200).send('OK');
-  } catch (error) {
-    console.error('Erro no Webhook:', error);
-    res.status(500).send('Erro interno');
+    const model = process.env.GEMINI_MODEL ?? 'gemini-3.8-flash';
+    const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+      signal: AbortSignal.timeout(25000),
+      body: JSON.stringify({
+        contents: [{ parts: [
+          { text: 'Identifique as duas cartas do jogador e as cartas comunitárias visíveis em uma mesa de Texas Hold’em. Use códigos As, Th, 2c (T para 10). Retorne listas vazias quando não for possível identificar as cartas com segurança.' },
+          { inlineData: { mimeType: image[1], data: image[2] } },
+        ] }],
+        generationConfig: {
+          responseMimeType: 'application/json',
+          responseSchema: { type: 'OBJECT', required: ['hero_hand', 'board'], properties: {
+            hero_hand: { type: 'ARRAY', items: { type: 'STRING' } },
+            board: { type: 'ARRAY', items: { type: 'STRING' } },
+          } },
+        },
+      }),
+    });
+    if (!response.ok) return res.status(502).json({ error: 'O serviço de análise não respondeu. Tente novamente.' });
+    const result = await response.json();
+    const detected = JSON.parse(result.candidates?.[0]?.content?.parts?.find((part: { text?: string; thought?: boolean }) => part.text && !part.thought)?.text ?? '{}');
+    const hero = parseCardList(detected.hero_hand);
+    const board = parseCardList(detected.board);
+    if (!hero || hero.length !== 2 || !board || ![0, 3, 4, 5].includes(board.length) ||
+        new Set([...hero, ...board]).size !== hero.length + board.length) {
+      return res.status(422).json({ error: 'Não foi possível identificar as cartas com segurança. Tente outra imagem.' });
+    }
+    return res.json({ hero_hand: hero, board });
+  } catch {
+    return res.status(502).json({ error: 'Não foi possível analisar a imagem. Tente novamente.' });
   }
 });
 
@@ -131,49 +175,28 @@ const STRONG_HANDS = ['99', '88', '77', 'AJs', 'ATs', 'AQo', 'KQs', 'KJs'];
 const PLAYABLE_HANDS = ['66', '55', '44', '33', '22', 'A9s', 'A8s', 'A5s', 'A4s', 'AJo', 'ATo', 'KQo', 'QJs', 'JTs', 'T9s', '98s'];
 const SPIN_PUSH_HANDS = [...PREMIUM_HANDS, ...STRONG_HANDS, ...PLAYABLE_HANDS, 'A2o', 'A3o', 'A4o', 'A5o', 'A6o', 'A7o', 'A8o', 'A9o', 'K9s', 'K8s', 'Q9s'];
 
-function evaluatePostFlop(heroHand: string[], board: string[]) {
-  const allCards = [...heroHand, ...board];
-  const suitCounts: Record<string, number> = {};
-  allCards.forEach(c => { const s = c[1]; suitCounts[s] = (suitCounts[s] || 0) + 1; });
-  const maxSuitCount = Math.max(...Object.values(suitCounts), 0);
-  const hasFlush = maxSuitCount >= 5; const hasFlushDraw = maxSuitCount === 4;
-
-  const hRanks = heroHand.map(c => getRankVal(c[0]));
-  const bRanks = board.map(c => getRankVal(c[0]));
-  const highestBoardRank = Math.max(...bRanks);
-  const isPocketPair = hRanks[0] === hRanks[1];
-  const isOverpair = isPocketPair && hRanks[0] > highestBoardRank;
-  
-  let hitBoardCount = 0; let isTopPair = false; let isMidBottomPair = false;
-  hRanks.forEach(hr => {
-    if (bRanks.includes(hr)) {
-      hitBoardCount++;
-      if (hr === highestBoardRank) isTopPair = true;
-      else isMidBottomPair = true;
-    }
-  });
-
-  const isTwoPairOrSet = hitBoardCount >= 2 || (isPocketPair && bRanks.includes(hRanks[0]));
-  if (hasFlush) return { category: 'monster', desc: 'Flush Completo', isDraw: false };
-  if (isTwoPairOrSet) return { category: 'strong', desc: 'Dois Pares ou Trinca', isDraw: false };
-  if (isOverpair) return { category: 'strong', desc: 'Overpair', isDraw: false };
-  if (isTopPair) return { category: 'marginal_plus', desc: 'Top Pair', isDraw: false };
-  if (hasFlushDraw) return { category: 'draw', desc: 'Flush Draw', isDraw: true };
-  if (isMidBottomPair) return { category: 'marginal', desc: 'Par Médio/Baixo', isDraw: false };
-  return { category: 'trash', desc: 'Air (Sem acerto)', isDraw: false };
-}
-
 app.post('/api/poker/calculate', (req: Request, res: Response) => {
   try {
-    const { heroHand, board, position, stackDepth, actionToHero, gameMode } = req.body;
-    
-    if (board && board.length >= 3) {
-      const postFlop = evaluatePostFlop(heroHand, board);
-      const stage = board.length === 3 ? 'Flop' : board.length === 4 ? 'Turn' : 'River';
-      if (postFlop.category === 'monster' || postFlop.category === 'strong') return res.json({ action: 'RAISE', confidence: 0.95, sizing: '50% a 75% Pote', rationale: `Modo PRO (${stage}): ${postFlop.desc}. Extraia valor!`, evEstimate: 4.5, riskLevel: 'HIGH' });
-      if (postFlop.category === 'marginal_plus') return res.json({ action: 'CALL', confidence: 0.85, sizing: 'Controle', rationale: `Modo PRO (${stage}): ${postFlop.desc}. Controle o pote.`, evEstimate: 1.5, riskLevel: 'MEDIUM' });
-      if (postFlop.isDraw) return res.json({ action: 'CALL / SEMI-BLUFF', confidence: 0.8, sizing: 'Odds', rationale: `Modo PRO (${stage}): ${postFlop.desc}. Pague pelas odds ou aposte.`, evEstimate: 1.2, riskLevel: 'HIGH' });
-      return res.json({ action: 'CHECK / FOLD', confidence: 0.9, sizing: '0', rationale: `Modo PRO (${stage}): ${postFlop.desc}. Desista para agressão.`, evEstimate: 0, riskLevel: 'LOW' });
+    const { position, stackDepth, actionToHero, gameMode } = req.body;
+    const heroHand = parseCardList(req.body.heroHand);
+    const board = parseCardList(req.body.board ?? []);
+    if (!heroHand || heroHand.length !== 2 || !board || ![0, 3, 4, 5].includes(board.length) ||
+        new Set([...heroHand, ...board]).size !== heroHand.length + board.length ||
+        !['UTG', 'MP', 'CO', 'BTN', 'SB', 'BB'].includes(position) ||
+        !['low', 'medium', 'deep'].includes(stackDepth) ||
+        !['unopened', 'limp', 'raise', '3bet'].includes(actionToHero) ||
+        !['CASH', 'MTT', 'SPIN'].includes(gameMode)) {
+      return res.status(400).json({ error: 'Confira as cartas e as opções da mão.' });
+    }
+    if (board.length) {
+      const stage: Stage = board.length === 3 ? 'flop' : board.length === 4 ? 'turn' : 'river';
+      const result = calculateDecision({
+        heroCardsRaw: heroHand, boardCardsRaw: board, stage, position,
+        effectiveStackBB: stackDepth === 'low' ? 12 : stackDepth === 'deep' ? 100 : 40,
+        activeVillains: null, actionToHero,
+      });
+      const rationale = result.tacticalJustification.replace(/\. (?:Combine a fold equity|Busque fechar o draw).*$/, '.');
+      return res.json({ action: result.primaryAction.replace('_', '-'), sizing: result.recommendedBetSize, rationale });
     }
 
     const handKey = getHandKey(heroHand[0], heroHand[1]);
@@ -182,33 +205,33 @@ app.post('/api/poker/calculate', (req: Request, res: Response) => {
 
     if (gameMode === 'SPIN') {
       if (stackDepth === 'low') {
-        if (actionToHero === 'unopened') return res.json(isSpinPush ? { action: 'ALL-IN', confidence: 0.98, sizing: 'Push', rationale: `Nash Shove.`, evEstimate: 3.0, riskLevel: 'HIGH' } : { action: 'FOLD', confidence: 0.9, sizing: '0', rationale: 'Fold GTO.', evEstimate: 0, riskLevel: 'LOW' });
+        if (actionToHero === 'unopened') return res.json(isSpinPush ? { action: 'ALL-IN', sizing: 'Push', rationale: `Nash Shove.` } : { action: 'FOLD', sizing: '0', rationale: 'Fold GTO.' });
       }
-      return res.json((isPremium || isStrong || isPlayable) ? { action: 'RAISE', confidence: 0.9, sizing: '2.0x BB', rationale: 'Min-raise.', evEstimate: 1.5, riskLevel: 'MEDIUM' } : { action: 'FOLD', confidence: 0.9, sizing: '0', rationale: 'Fold GTO.', evEstimate: 0, riskLevel: 'LOW' });
+      return res.json((isPremium || isStrong || isPlayable) ? { action: 'RAISE', sizing: '2.0x BB', rationale: 'Min-raise.' } : { action: 'FOLD', sizing: '0', rationale: 'Fold GTO.' });
     }
 
     if (gameMode === 'CASH') {
       if (actionToHero === 'unopened') {
-        if (isPremium || isStrong) return res.json({ action: 'RAISE', confidence: 0.95, sizing: '3.0x BB', rationale: `Cash: Open-raise maior devido ao Rake.`, evEstimate: 2.5, riskLevel: 'MEDIUM' });
-        if (isPlayable && ['CO', 'BTN'].includes(position)) return res.json({ action: 'RAISE', confidence: 0.85, sizing: '2.5x BB', rationale: `Roubo em posição.`, evEstimate: 1.2, riskLevel: 'MEDIUM' });
-        return res.json({ action: 'FOLD', confidence: 0.9, sizing: '0', rationale: `Fold.`, evEstimate: 0, riskLevel: 'LOW' });
+        if (isPremium || isStrong) return res.json({ action: 'RAISE', sizing: '3.0x BB', rationale: `Cash: Open-raise maior devido ao Rake.` });
+        if (isPlayable && ['CO', 'BTN'].includes(position)) return res.json({ action: 'RAISE', sizing: '2.5x BB', rationale: `Roubo em posição.` });
+        return res.json({ action: 'FOLD', sizing: '0', rationale: `Fold.` });
       }
       if (actionToHero === 'raise') {
-        if (isPremium) return res.json({ action: 'RAISE', confidence: 0.95, sizing: '3-Bet (3.5x)', rationale: `3-Bet valor.`, evEstimate: 4.0, riskLevel: 'HIGH' });
-        if ((isStrong || isPlayable) && position === 'BB') return res.json({ action: 'CALL', confidence: 0.85, sizing: 'Call', rationale: `Defesa de BB.`, evEstimate: 1.0, riskLevel: 'MEDIUM' });
-        return res.json({ action: 'FOLD', confidence: 0.9, sizing: '0', rationale: `Fold.`, evEstimate: 0, riskLevel: 'LOW' });
+        if (isPremium) return res.json({ action: 'RAISE', sizing: '3-Bet (3.5x)', rationale: `3-Bet valor.` });
+        if ((isStrong || isPlayable) && position === 'BB') return res.json({ action: 'CALL', sizing: 'Call', rationale: `Defesa de BB.` });
+        return res.json({ action: 'FOLD', sizing: '0', rationale: `Fold.` });
       }
     }
 
     if (actionToHero === 'unopened') {
-      if (isPremium || isStrong) return res.json({ action: 'RAISE', confidence: 0.92, sizing: '2.2x BB', rationale: `Open MTT.`, evEstimate: 1.8, riskLevel: 'MEDIUM' });
-      if (isPlayable && ['CO', 'BTN', 'SB'].includes(position)) return res.json({ action: 'RAISE', confidence: 0.85, sizing: '2.0x BB', rationale: `Roubo.`, evEstimate: 1.1, riskLevel: 'MEDIUM' });
-      return res.json({ action: 'FOLD', confidence: 0.88, sizing: '0', rationale: `Fold.`, evEstimate: 0, riskLevel: 'LOW' });
+      if (isPremium || isStrong) return res.json({ action: 'RAISE', sizing: '2.2x BB', rationale: `Open MTT.` });
+      if (isPlayable && ['CO', 'BTN', 'SB'].includes(position)) return res.json({ action: 'RAISE', sizing: '2.0x BB', rationale: `Roubo.` });
+      return res.json({ action: 'FOLD', sizing: '0', rationale: `Fold.` });
     }
-    return res.json({ action: 'FOLD', confidence: 0.8, sizing: '0', rationale: `Fold padrão.`, evEstimate: 0, riskLevel: 'LOW' });
+    return res.json({ action: 'FOLD', sizing: '0', rationale: `Fold padrão.` });
 
   } catch (error) {
-    return res.status(500).json({ action: 'ERRO', confidence: 0, sizing: '-', rationale: 'Erro interno.', evEstimate: 0, riskLevel: 'LOW' });
+    return res.status(500).json({ action: 'ERRO', sizing: '-', rationale: 'Erro interno.' });
   }
 });
 

@@ -7,7 +7,7 @@ import {
   isPushFoldHand,
   evaluatePostflop,
   calculateDecision,
-} from './pokerEngine';
+} from './pokerHeuristics';
 
 test('normalizeCard handles valid and lowercase/alternate card notations', () => {
   assert.equal(normalizeCard('As'), 'As');

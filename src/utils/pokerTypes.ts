@@ -8,6 +8,12 @@ export interface CardObject {
 }
 
 export type Position = 'UTG' | 'MP' | 'CO' | 'BTN' | 'SB' | 'BB';
+export type TablePosition = Position;
+export interface PokerDecision {
+  action: string;
+  sizing: string;
+  rationale: string;
+}
 export type Stage = 'preflop' | 'flop' | 'turn' | 'river';
 export type ActionToHero = 'unopened' | 'limp' | 'raise' | '3bet';
 

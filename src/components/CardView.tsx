@@ -1,5 +1,5 @@
 import React from 'react';
-import { parseCard, SUIT_INFO } from '../utils/pokerEngine';
+import { parseCard, SUIT_INFO } from '../utils/pokerHeuristics';
 
 interface CardViewProps {
   cardStr?: string | null;

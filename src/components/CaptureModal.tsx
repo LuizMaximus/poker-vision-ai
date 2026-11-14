@@ -9,6 +9,7 @@ interface CaptureModalProps {
   onImageCaptured: (base64Image: string) => Promise<void>;
   onScenarioSelected: (scenario: SampleScenario) => void;
   isProcessing: boolean;
+  analysisError?: string;
 }
 
 export const CaptureModal: React.FC<CaptureModalProps> = ({
@@ -17,6 +18,7 @@ export const CaptureModal: React.FC<CaptureModalProps> = ({
   onImageCaptured,
   onScenarioSelected,
   isProcessing,
+  analysisError,
 }) => {
   const [useLiveCamera, setUseLiveCamera] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -209,10 +211,10 @@ export const CaptureModal: React.FC<CaptureModalProps> = ({
           </div>
         )}
 
-        {cameraError && (
+        {(cameraError || analysisError) && (
           <div className="flex items-center gap-2 text-xs text-amber-300 bg-amber-950/40 border border-amber-600/40 rounded-xl p-3">
             <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
-            <span>{cameraError}</span>
+            <span role="alert">{analysisError || cameraError}</span>
           </div>
         )}
 

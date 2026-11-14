@@ -1,6 +1,6 @@
 import React from 'react';
 import { PokerDecision } from '../utils/pokerTypes';
-import { Target, TrendingUp, AlertTriangle, ShieldCheck, Zap } from 'lucide-react';
+import { TrendingUp, AlertTriangle, ShieldCheck, Zap } from 'lucide-react';
 
 interface Props {
   decision: PokerDecision | null;
@@ -29,35 +29,23 @@ export const DecisionDisplay: React.FC<Props> = ({ decision }) => {
       
       <div className="flex items-start justify-between mb-4">
         <div>
-          <span className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1 block">Ação Recomendada (GTO)</span>
+          <span className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1 block">Recomendação heurística</span>
           <div className={`text-3xl font-black ${textColors} flex items-center gap-3 tracking-tight`}>
             {decision.action}
             {!isWait && <ActionIcon className="w-7 h-7 opacity-80" />}
           </div>
         </div>
-        <div className="text-right">
-          <span className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1 block">Confiança</span>
-          <div className="text-xl font-black text-white">
-            {isWait ? '-' : `${(decision.confidence * 100).toFixed(0)}%`}
-          </div>
-        </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 mb-4">
+      <div className="mb-4">
         <div className="bg-black/40 rounded-xl p-3 border border-white/5">
           <span className="text-[9px] font-bold uppercase tracking-wider text-slate-500 block mb-1">Sizing (Tamanho)</span>
           <span className="text-sm font-bold text-amber-400">{decision.sizing}</span>
         </div>
-        <div className="bg-black/40 rounded-xl p-3 border border-white/5">
-          <span className="text-[9px] font-bold uppercase tracking-wider text-slate-500 block mb-1">EV / Risco</span>
-          <span className="text-sm font-bold text-slate-300 flex items-center gap-1.5">
-            <Target className="w-3.5 h-3.5 text-slate-500" /> {decision.riskLevel}
-          </span>
-        </div>
       </div>
 
       <div className="bg-black/20 rounded-xl p-4 border border-white/5 relative">
-        <span className="text-[9px] font-bold uppercase tracking-wider text-slate-500 block mb-1.5">Justificativa da IA</span>
+        <span className="text-[9px] font-bold uppercase tracking-wider text-slate-500 block mb-1.5">Justificativa</span>
         <p className="text-sm text-slate-300 leading-relaxed font-medium">
           {decision.rationale}
         </p>
