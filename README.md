@@ -22,4 +22,4 @@ Em produção, rode `npm run build` e inicie com `NODE_ENV=production` e `npm st
 
 - **Firebase.** Habilite e-mail/senha e Google, e autorize os domínios do app no Firebase Authentication. Configure credenciais de servidor via Application Default Credentials. O cliente precisa ler somente o próprio perfil em `users/{email}`. Restrinja gravações de benefícios PRO e acesso a `processedPayments` ao servidor.
 - **Mercado Pago.** Revogue a credencial antiga e configure `MERCADO_PAGO_ACCESS_TOKEN` com uma nova credencial. Informe o endereço público em `PUBLIC_APP_URL` e valide o fluxo de checkout e a entrega do webhook `/api/webhook` em ambiente de teste. Configure `MERCADO_PAGO_SANDBOX=false` e a credencial de produção para pagamentos reais.
-- **Gemini.** Configure `GEMINI_API_KEY` no servidor para habilitar a leitura de cartas por imagem. `GEMINI_MODEL` é opcional.
+- **Teste PRO.** Cada conta tem 72 horas de acesso PRO a partir da data de criação no Firebase Authentication, inclusive pelo Google. A conta volta ao pré-flop gratuito ao fim do prazo. Ativar um plano pago exige checkout separado.

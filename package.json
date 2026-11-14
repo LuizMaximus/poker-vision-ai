@@ -7,7 +7,7 @@
     "dev": "tsx server.ts",
     "build": "vite build",
     "lint": "tsc --noEmit",
-    "test": "tsx --test src/utils/pokerEngine.test.ts",
+    "test": "tsx --test accountAccess.test.ts src/utils/pokerEngine.test.ts",
     "start": "tsx server.ts"
   },
   "dependencies": {

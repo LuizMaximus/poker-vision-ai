@@ -17,26 +17,6 @@ export interface PokerDecision {
 export type Stage = 'preflop' | 'flop' | 'turn' | 'river';
 export type ActionToHero = 'unopened' | 'limp' | 'raise' | '3bet';
 
-export interface VisionExtraction {
-  hero_hand: string[];
-  board: string[];
-  stage: Stage;
-  position: Position | null;
-  effective_stack_bb: number | null;
-  active_villains: number | null;
-  action_to_hero: ActionToHero | null;
-  confidence: {
-    hero_hand: number;
-    board: number;
-    position: number;
-    effective_stack_bb: number;
-    active_villains: number;
-    action_to_hero: number;
-    summary?: string;
-  };
-  notes?: string;
-}
-
 export type PrimaryAction = 'FOLD' | 'CHECK' | 'CALL' | 'RAISE' | 'ALL_IN';
 
 export interface ActionDistribution {
@@ -61,12 +41,4 @@ export interface StrategicRecommendation {
   };
   rangeAdvantage: 'hero' | 'neutral' | 'villain';
   keyRiskAlert?: string;
-}
-
-export interface SampleScenario {
-  id: string;
-  title: string;
-  description: string;
-  extraction: VisionExtraction;
-  mockImageUrl?: string;
 }

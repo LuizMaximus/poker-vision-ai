@@ -23,15 +23,18 @@ export const SUIT_INFO: Record<Suit, { symbol: string; name: string; color: stri
 };
 
 // --- CLIENTE DE COMUNICAÇÃO SEGURO ---
-export async function fetchFastDecision(input: FastDecisionInput): Promise<PokerDecision> {
+export async function fetchFastDecision(input: FastDecisionInput, user?: { getIdToken(): Promise<string> }): Promise<PokerDecision> {
   try {
     const response = await fetch('/api/poker/calculate', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(user ? { Authorization: 'Bearer ' + await user.getIdToken() } : {}) },
       body: JSON.stringify(input),
     });
 
     if (!response.ok) {
+      if (response.status === 403) {
+        return { action: 'PRO', sizing: '-', rationale: 'O pós-flop está disponível durante o teste ou com um plano PRO.' };
+      }
       throw new Error('Falha de permissão ou servidor.');
     }
 

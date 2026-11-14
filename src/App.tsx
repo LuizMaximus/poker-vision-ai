@@ -2,12 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { TablePosition, PokerDecision } from './utils/pokerTypes';
 import { fetchFastDecision, StackDepth, GameMode } from './utils/pokerEngine';
 import { CardPickerModal } from './components/CardPickerModal';
-import { CaptureModal } from './components/CaptureModal';
 import { DecisionDisplay } from './components/DecisionDisplay';
 import { Zap, RotateCcw, Swords, Coins, Trophy, Lock, Crown, LogOut, Mail, KeyRound, Loader2, AlertCircle, Clock, ShieldCheck, Sparkles, CheckCircle2, MessageSquare, Menu, X, FileText, ChevronDown, ArrowRight } from 'lucide-react';
-import { auth, db, googleProvider } from './firebase';
+import { auth, googleProvider } from './firebase';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithPopup, onAuthStateChanged, signOut, User } from 'firebase/auth';
-import { doc, onSnapshot } from 'firebase/firestore';
 
 export const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -18,8 +16,10 @@ export const App: React.FC = () => {
   const [password, setPassword] = useState('');
   const [authError, setAuthError] = useState('');
 
-  const [isProUser, setIsProUser] = useState(false);
-  const [daysRemaining, setDaysRemaining] = useState<number | null>(null);
+  const [access, setAccess] = useState<{plan: 'free' | 'trial' | 'paid'; endsAt: number | null} | null>(null);
+  const [accessError, setAccessError] = useState(false);
+  const isProUser = access !== null && access.plan !== 'free';
+  const daysRemaining = access?.endsAt ? Math.max(1, Math.ceil((access.endsAt - Date.now()) / 86400000)) : null;
   const [selectedPlan, setSelectedPlan] = useState<'mensal' | 'semestral' | 'anual'>('mensal');
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [isCheckoutLoading, setIsCheckoutLoading] = useState(false);
@@ -39,9 +39,6 @@ export const App: React.FC = () => {
   const [pickerTarget, setPickerTarget] = useState<'hero' | 'board' | null>(null);
   const [decision, setDecision] = useState<PokerDecision | null>(null);
   const [isCalculating, setIsCalculating] = useState(false);
-  const [showCapture, setShowCapture] = useState(false);
-  const [isCapturing, setIsCapturing] = useState(false);
-  const [captureError, setCaptureError] = useState('');
 
   // Link do WhatsApp com mensagem automática
   const whatsappUrl = "https://wa.me/5511944870124?text=Ol%C3%A1%2C%20vim%20pelo%20Poker%20Vision%20AI%20e%20quero%20tirar%20uma%20d%C3%BAvida.";
@@ -58,37 +55,50 @@ export const App: React.FC = () => {
     }
   }, []);
 
-  // --- VERIFICAR STATUS E VALIDADE DO PRO NO FIREBASE ---
+  useEffect(() => onAuthStateChanged(auth, (currentUser) => {
+    setUser(currentUser);
+    setAccess(null);
+    setAccessError(false);
+    setBoardCards([]);
+    setPickerTarget(null);
+    setIsAuthLoading(false);
+  }), []);
+
   useEffect(() => {
-    let unsubscribeProfile: (() => void) | undefined;
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      unsubscribeProfile?.();
-      setUser(currentUser);
-      setIsProUser(false);
-      setDaysRemaining(null);
-      setBoardCards([]);
-      setShowCapture(false);
-      if (currentUser && currentUser.email) {
-        unsubscribeProfile = onSnapshot(doc(db, 'users', currentUser.email), (snapshot) => {
-          const profile = snapshot.data();
-          const remaining = profile?.expiresAt
-            ? Math.ceil((Date.parse(profile.expiresAt) - Date.now()) / 86400000)
-            : null;
-          const pro = profile?.isPro === true && (remaining === null || remaining > 0);
-          setIsProUser(pro);
-          setDaysRemaining(pro ? remaining : null);
-        }, () => {
-          setIsProUser(false);
-          setDaysRemaining(null);
+    if (!user) return;
+    let active = true;
+    let expiry: ReturnType<typeof setTimeout>;
+    const refresh = async () => {
+      try {
+        const response = await fetch('/api/account/access', {
+          headers: { Authorization: 'Bearer ' + await user.getIdToken() },
         });
+        if (!response.ok) throw new Error('Falha ao consultar plano');
+        const next = await response.json();
+        if (!active) return;
+        setAccess(next);
+        setAccessError(false);
+        clearTimeout(expiry);
+        if (next.endsAt) {
+          expiry = setTimeout(() => {
+            setAccess(null);
+            setBoardCards([]);
+            setPickerTarget(null);
+            void refresh();
+          }, Math.min(Math.max(0, next.endsAt - Date.now()) + 100, 2147483647));
+        }
+      } catch {
+        if (active) setAccessError(true);
       }
-      setIsAuthLoading(false);
-    });
-    return () => {
-      unsubscribe();
-      unsubscribeProfile?.();
     };
-  }, []);
+    void refresh();
+    const interval = setInterval(refresh, 60000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+      clearTimeout(expiry);
+    };
+  }, [user]);
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -144,28 +154,6 @@ export const App: React.FC = () => {
     setIsCheckoutLoading(false);
   };
 
-  const handleImageCaptured = async (image: string) => {
-    if (!user || isCapturing) return;
-    setCaptureError('');
-    setIsCapturing(true);
-    try {
-      const response = await fetch('/api/poker/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await user.getIdToken()}` },
-        body: JSON.stringify({ image }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error);
-      setHeroHand(data.hero_hand);
-      setBoardCards(data.board);
-      setShowCapture(false);
-    } catch (error) {
-      setCaptureError(error instanceof Error ? error.message : 'Não foi possível ler a imagem.');
-    } finally {
-      setIsCapturing(false);
-    }
-  };
-
   useEffect(() => {
     if (!user) return;
     let isMounted = true;
@@ -176,7 +164,7 @@ export const App: React.FC = () => {
         return;
       }
       setIsCalculating(true);
-      const result = await fetchFastDecision({ heroHand, board: boardCards, position, stackDepth, actionToHero, gameMode });
+      const result = await fetchFastDecision({ heroHand, board: boardCards, position, stackDepth, actionToHero, gameMode }, boardCards.length ? user : undefined);
       if (isMounted) { setDecision(result); setIsCalculating(false); }
     };
     getDecision();
@@ -208,6 +196,7 @@ export const App: React.FC = () => {
             <h1 className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-amber-200 to-amber-500 text-center font-serif mb-1 tracking-tight">POKER VISION AI</h1>
             <p className="text-xs text-emerald-400/80 text-center mb-6 font-medium">Seu assistente de estratégia de poker</p>
 
+            {authMode === 'register' && <p className="mb-4 text-center text-xs text-emerald-200">3 dias de PRO após criar a conta. Sem cartão e sem cobrança automática.</p>}
             {authError && <div className="mb-4 bg-red-950/50 border border-red-900/50 text-red-400 text-xs font-bold text-center py-2 rounded-lg flex items-center justify-center gap-1.5"><AlertCircle className="w-3.5 h-3.5" />{authError}</div>}
 
             <form onSubmit={handleAuth} className="flex flex-col gap-4">
@@ -328,7 +317,7 @@ export const App: React.FC = () => {
           </h1>
 
           <p className="max-w-2xl mx-auto text-base sm:text-lg text-slate-300 mb-10 leading-relaxed font-normal">
-            Estude mãos de Texas Hold’em no celular. Crie uma conta para analisar o pré-flop grátis. O PRO libera a análise pós-flop e a leitura de cartas por imagem.
+            Estude mãos de Texas Hold’em no celular. Crie uma conta e ganhe 3 dias de PRO, sem cartão, para analisar pré-flop e pós-flop. Depois, continue no pré-flop grátis ou escolha um plano PRO.
           </p>
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 max-w-md mx-auto mb-16">
@@ -456,7 +445,6 @@ export const App: React.FC = () => {
                   <ul className="flex flex-col gap-3 text-xs text-slate-300 mb-8">
                     <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-400" /> Acesso a todos os modos (MTT, Cash, Spin)</li>
                     <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-400" /> Motor PRO de Pós-Flop desbloqueado</li>
-                    <li className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-emerald-400" /> Análise por imagem</li>
                   </ul>
                 </div>
                 <button
@@ -679,18 +667,13 @@ export const App: React.FC = () => {
                 <span className="text-[10px] text-emerald-400/70 font-medium truncate max-w-[130px] block">{user.email}</span>
                 {isProUser && daysRemaining !== null && (
                   <span className="text-[9px] bg-amber-500/20 text-amber-400 px-1.5 py-0.2 rounded border border-amber-500/30 font-bold flex items-center gap-1">
-                    <Clock className="w-2.5 h-2.5" /> {daysRemaining}d restantes
+                    <Clock className="w-2.5 h-2.5" /> {access?.plan === 'trial' ? 'Teste PRO · ' : ''}{daysRemaining}d restantes
                   </span>
                 )}
               </div>
             </div>
           </div>
           <div className="flex gap-2">
-            {isProUser && (
-              <button type="button" onClick={() => { setCaptureError(''); setShowCapture(true); }} className="px-3 py-1.5 rounded-xl border border-emerald-800 text-emerald-200 text-xs font-bold">
-                Analisar imagem
-              </button>
-            )}
             {!isProUser && (
               <button onClick={() => setShowUpgradeModal(true)} className="px-3 py-1.5 bg-gradient-to-r from-amber-500 to-amber-400 text-slate-950 font-black text-xs rounded-xl shadow-md flex items-center gap-1">
                 <Crown className="w-3.5 h-3.5" /> PRO
@@ -725,7 +708,7 @@ export const App: React.FC = () => {
             <span className="text-[11px] font-bold text-amber-400/80 uppercase tracking-widest">2. Board (Pós-Flop)</span>
             {!isProUser && <span className="bg-amber-500/20 text-amber-400 text-[9px] px-2 py-0.5 rounded border border-amber-500/30 font-bold flex gap-1 items-center shadow-[0_0_8px_rgba(245,158,11,0.2)]"><Lock className="w-3 h-3" /> PRO</span>}
           </div>
-          <div onClick={() => { if (!isProUser) { setShowUpgradeModal(true); return; } setPickerTarget('board'); }} className={`flex justify-center gap-1.5 p-4 rounded-xl border border-dashed cursor-pointer transition-all ${isProUser ? 'bg-[#05140e] border-emerald-800/80 hover:bg-emerald-950/30 group' : 'bg-[#020806]/80 border-emerald-900/50 blur-[3px] scale-[0.98]'}`}>
+          <div onClick={() => { if (!access) return; if (!isProUser) { setShowUpgradeModal(true); return; } setPickerTarget('board'); }} className={`flex justify-center gap-1.5 p-4 rounded-xl border border-dashed cursor-pointer transition-all ${isProUser ? 'bg-[#05140e] border-emerald-800/80 hover:bg-emerald-950/30 group' : 'bg-[#020806]/80 border-emerald-900/50 blur-[3px] scale-[0.98]'}`}>
             {[1, 2, 3, 4, 5].map((_, i) => {
               const c = boardCards[i];
               return c ? (
@@ -826,18 +809,7 @@ export const App: React.FC = () => {
         </div>
       )}
 
-      <CaptureModal
-        isOpen={showCapture && isProUser}
-        onClose={() => setShowCapture(false)}
-        onImageCaptured={handleImageCaptured}
-        onScenarioSelected={({ extraction }) => {
-          setHeroHand(extraction.hero_hand);
-          setBoardCards(extraction.board);
-          setShowCapture(false);
-        }}
-        isProcessing={isCapturing}
-        analysisError={captureError}
-      />
+      {accessError && <p role="status" className="p-3 text-center text-amber-200">Não foi possível consultar seu acesso PRO. Vamos tentar novamente.</p>}
       <CardPickerModal
         isOpen={pickerTarget !== null}
         onClose={() => setPickerTarget(null)}

@@ -8,6 +8,7 @@ import { applicationDefault, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
 import { calculateDecision, normalizeCard } from './src/utils/pokerHeuristics';
+import { resolveAccess } from './accountAccess';
 import type { Stage } from './src/utils/pokerTypes';
 
 dotenv.config({ path: '.env.local' });
@@ -36,18 +37,35 @@ function getPlan(key: unknown) {
   return typeof key === 'string' && Object.hasOwn(plans, key) ? plans[key as keyof typeof plans] : undefined;
 }
 
-async function authenticatedEmail(req: Request) {
+async function authenticatedUser(req: Request) {
   const token = req.get('authorization')?.match(/^Bearer (\S+)$/i)?.[1];
   if (!token) return null;
   try {
-    return (await auth.verifyIdToken(token)).email ?? null;
+    return await auth.verifyIdToken(token);
   } catch {
     return null;
   }
 }
 
+async function proAccess(user: { uid: string; email?: string }) {
+  const account = await auth.getUser(user.uid);
+  const profile = user.email ? (await db.collection('users').doc(user.email).get()).data() : undefined;
+  return resolveAccess(account.metadata.creationTime, profile);
+}
+
+app.get('/api/account/access', async (req: Request, res: Response) => {
+  res.set('Cache-Control', 'no-store');
+  const user = await authenticatedUser(req);
+  if (!user) return res.sendStatus(401);
+  try {
+    return res.json(await proAccess(user));
+  } catch {
+    return res.sendStatus(503);
+  }
+});
+
 app.post('/api/checkout', async (req: Request, res: Response) => {
-  const email = await authenticatedEmail(req);
+  const email = (await authenticatedUser(req))?.email;
   if (!email) return res.status(401).json({ error: 'Entre novamente para continuar.' });
   const { planType } = req.body;
   const plan = getPlan(planType);
@@ -112,52 +130,6 @@ function parseCardList(value: unknown): string[] | null {
   return cards.every((card): card is string => card !== null) ? cards : null;
 }
 
-app.post('/api/poker/analyze', async (req: Request, res: Response) => {
-  const email = await authenticatedEmail(req);
-  if (!email) return res.status(401).json({ error: 'Entre novamente para analisar uma imagem.' });
-  const key = process.env.GEMINI_API_KEY;
-  if (!key) return res.status(503).json({ error: 'Análise de imagens temporariamente indisponível.' });
-  const image = typeof req.body.image === 'string' && req.body.image.match(/^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/]+=*)$/);
-  if (!image) return res.status(400).json({ error: 'Envie uma imagem JPEG, PNG ou WebP.' });
-  try {
-    const profile = (await db.collection('users').doc(email).get()).data();
-    if (profile?.isPro !== true || (profile.expiresAt && !(Date.parse(profile.expiresAt) > Date.now()))) {
-      return res.status(403).json({ error: 'A análise de imagens está disponível no plano PRO.' });
-    }
-    const model = process.env.GEMINI_MODEL ?? 'gemini-3.8-flash';
-    const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
-      signal: AbortSignal.timeout(25000),
-      body: JSON.stringify({
-        contents: [{ parts: [
-          { text: 'Identifique as duas cartas do jogador e as cartas comunitárias visíveis em uma mesa de Texas Hold’em. Use códigos As, Th, 2c (T para 10). Retorne listas vazias quando não for possível identificar as cartas com segurança.' },
-          { inlineData: { mimeType: image[1], data: image[2] } },
-        ] }],
-        generationConfig: {
-          responseMimeType: 'application/json',
-          responseSchema: { type: 'OBJECT', required: ['hero_hand', 'board'], properties: {
-            hero_hand: { type: 'ARRAY', items: { type: 'STRING' } },
-            board: { type: 'ARRAY', items: { type: 'STRING' } },
-          } },
-        },
-      }),
-    });
-    if (!response.ok) return res.status(502).json({ error: 'O serviço de análise não respondeu. Tente novamente.' });
-    const result = await response.json();
-    const detected = JSON.parse(result.candidates?.[0]?.content?.parts?.find((part: { text?: string; thought?: boolean }) => part.text && !part.thought)?.text ?? '{}');
-    const hero = parseCardList(detected.hero_hand);
-    const board = parseCardList(detected.board);
-    if (!hero || hero.length !== 2 || !board || ![0, 3, 4, 5].includes(board.length) ||
-        new Set([...hero, ...board]).size !== hero.length + board.length) {
-      return res.status(422).json({ error: 'Não foi possível identificar as cartas com segurança. Tente outra imagem.' });
-    }
-    return res.json({ hero_hand: hero, board });
-  } catch {
-    return res.status(502).json({ error: 'Não foi possível analisar a imagem. Tente novamente.' });
-  }
-});
-
 // --- LÓGICA GTO ---
 const getRankVal = (r: string) => '23456789TJQKA'.indexOf(r.toUpperCase());
 function getHandKey(card1: string, card2: string): string {
@@ -175,7 +147,7 @@ const STRONG_HANDS = ['99', '88', '77', 'AJs', 'ATs', 'AQo', 'KQs', 'KJs'];
 const PLAYABLE_HANDS = ['66', '55', '44', '33', '22', 'A9s', 'A8s', 'A5s', 'A4s', 'AJo', 'ATo', 'KQo', 'QJs', 'JTs', 'T9s', '98s'];
 const SPIN_PUSH_HANDS = [...PREMIUM_HANDS, ...STRONG_HANDS, ...PLAYABLE_HANDS, 'A2o', 'A3o', 'A4o', 'A5o', 'A6o', 'A7o', 'A8o', 'A9o', 'K9s', 'K8s', 'Q9s'];
 
-app.post('/api/poker/calculate', (req: Request, res: Response) => {
+app.post('/api/poker/calculate', async (req: Request, res: Response) => {
   try {
     const { position, stackDepth, actionToHero, gameMode } = req.body;
     const heroHand = parseCardList(req.body.heroHand);
@@ -189,6 +161,9 @@ app.post('/api/poker/calculate', (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Confira as cartas e as opções da mão.' });
     }
     if (board.length) {
+      const user = await authenticatedUser(req);
+      if (!user) return res.sendStatus(401);
+      if ((await proAccess(user)).plan === 'free') return res.status(403).json({ error: 'O pós-flop está disponível durante o teste ou com um plano PRO.' });
       const stage: Stage = board.length === 3 ? 'flop' : board.length === 4 ? 'turn' : 'river';
       const result = calculateDecision({
         heroCardsRaw: heroHand, boardCardsRaw: board, stage, position,
